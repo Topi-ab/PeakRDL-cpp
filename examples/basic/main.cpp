@@ -1,3 +1,6 @@
+// Copyright (c) 2026 PeakRDL-cpp contributors
+// SPDX-License-Identifier: LGPL-3.0-or-later
+
 #include <cstdint>
 #include <iostream>
 #include <unordered_map>

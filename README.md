@@ -120,5 +120,7 @@ Generated output exception:
   may be used, copied, modified, and distributed under terms of your choice,
   including proprietary terms.
 - This exception does not change the license of this project's own source code.
+- The exception is provided as an additional permission under GNU GPLv3
+  section 7 (as incorporated by LGPLv3).
 
 See [LICENSE.generated-output-exception](LICENSE.generated-output-exception).
