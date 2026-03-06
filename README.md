@@ -84,7 +84,7 @@ See checked-in example case:
 
 ```bash
 . .venv/bin/activate
-pip install -e . pytest
+pip install -e ".[test]"
 pytest
 ```
 
