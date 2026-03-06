@@ -88,6 +88,21 @@ pip install -e . pytest
 pytest
 ```
 
+Run adaptive compile/run checks against an external RDL file:
+
+```bash
+PEAKRDL_CPP_TEST_RDL=/abs/path/to/design.rdl \
+  ./.venv/bin/pytest -q tests/test_exporter_adaptive.py
+```
+
+Optional deterministic seed override:
+
+```bash
+PEAKRDL_CPP_TEST_RDL=/abs/path/to/design.rdl \
+PEAKRDL_CPP_TEST_SEED=42 \
+  ./.venv/bin/pytest -q tests/test_exporter_adaptive.py
+```
+
 The test suite includes end-to-end validation:
 
 - compile RDL
