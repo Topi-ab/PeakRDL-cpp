@@ -1,0 +1,39 @@
+regfile rf0_t {
+    reg {
+        field { 
+            sw=rw; 
+            hw=r; 
+            reset=8'h12; 
+        } data[7:0];
+        field {
+            sw = rw;
+            hw = r;
+            singlepulse;
+        } sp_f = 0;
+    } ctrl;
+};
+
+regfile rf1_t {
+    reg {
+        field { sw=rw; hw=r; reset=4'h3; } mode[3:0];
+    } ctrl;
+};
+
+regfile rf2_t {
+    reg {
+        field { sw=rw; hw=r; reset=1'h1; } en;
+    } ctrl;
+};
+
+regfile rf3_t {
+    reg {
+        field { sw=rw; hw=r; reset=16'h55AA; } cfg[15:0];
+    } ctrl;
+};
+
+addrmap typed_root {
+    rf0_t rf0;
+    rf1_t rf1;
+    rf2_t rf2;
+    rf3_t rf3[16];
+};

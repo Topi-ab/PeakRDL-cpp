@@ -12,6 +12,18 @@ from peakrdl_cpp import CppExporter
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_TMP_ROOT = PROJECT_ROOT / "tmp" / "pytest_cases"
+FIXTURE_RDL_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "rdl"
+
+
+def _fixture_rdl_files() -> list[Path]:
+    if not FIXTURE_RDL_ROOT.exists():
+        return []
+    return sorted(FIXTURE_RDL_ROOT.rglob("*.rdl"))
+
+
+def _fixture_case_id(path: Path) -> str:
+    rel = path.relative_to(FIXTURE_RDL_ROOT)
+    return "__".join(rel.parts).replace(".rdl", "")
 
 
 def _reset_case_dir(name: str) -> Path:
@@ -483,3 +495,68 @@ def test_generation_fails_on_mixed_accesswidth() -> None:
 
     with pytest.raises(ValueError, match="Multiple accesswidth values"):
         CppExporter().export(top, out_file, namespace="demo", class_name="Top")
+
+
+@pytest.mark.parametrize(
+    "fixture_rdl",
+    _fixture_rdl_files(),
+    ids=lambda p: _fixture_case_id(p),
+)
+def test_fixture_rdls_generate_compile_and_run_smoke(fixture_rdl: Path) -> None:
+    case_id = _fixture_case_id(fixture_rdl)
+    case_dir = _reset_case_dir(f"fixture_smoke_{case_id}")
+
+    rdl_file = case_dir / "design.rdl"
+    hpp_file = case_dir / "regs.hpp"
+    cpp_file = case_dir / "test.cpp"
+    exe_file = case_dir / "test_bin"
+
+    shutil.copyfile(fixture_rdl, rdl_file)
+
+    top = _compile_top(rdl_file)
+    CppExporter().export(
+        top,
+        hpp_file,
+        namespace="demo",
+        class_name="FixtureRoot",
+        error_style="exceptions",
+    )
+
+    cpp_test = """
+    #include <cstdint>
+    #include <unordered_map>
+
+    #include "regs.hpp"
+
+    struct MockBus {
+        std::unordered_map<demo::addr_t, demo::data_t> mem;
+
+        demo::data_t read(demo::addr_t addr) {
+            return mem[addr];
+        }
+
+        void write(demo::addr_t addr, demo::data_t value) {
+            mem[addr] = value;
+        }
+    };
+
+    int main() {
+        MockBus bus;
+        demo::FixtureRoot<MockBus> root(bus, static_cast<demo::addr_t>(0));
+        return root.ok() ? 0 : 1;
+    }
+    """
+
+    cpp_file.write_text(cpp_test, encoding="utf-8")
+    subprocess.run(
+        [
+            "g++",
+            "-std=c++20",
+            str(cpp_file.name),
+            "-o",
+            str(exe_file.name),
+        ],
+        check=True,
+        cwd=case_dir,
+    )
+    subprocess.run([str(exe_file)], check=True, cwd=case_dir)

@@ -18,9 +18,21 @@ from peakrdl_cpp import CppExporter
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_TMP_ROOT = PROJECT_ROOT / "tmp" / "pytest_cases"
 DEFAULT_RDL_PATH = PROJECT_ROOT / "examples" / "basic" / "design.rdl"
+FIXTURE_RDL_ROOT = PROJECT_ROOT / "tests" / "fixtures" / "rdl"
 
 RDL_PATH_ENV = "PEAKRDL_CPP_TEST_RDL"
 SEED_ENV = "PEAKRDL_CPP_TEST_SEED"
+
+
+def _fixture_rdl_files() -> list[Path]:
+    if not FIXTURE_RDL_ROOT.exists():
+        return []
+    return sorted(FIXTURE_RDL_ROOT.rglob("*.rdl"))
+
+
+def _fixture_case_id(path: Path) -> str:
+    rel = path.relative_to(FIXTURE_RDL_ROOT)
+    return "__".join(rel.parts).replace(".rdl", "")
 
 
 @dataclass(frozen=True)
@@ -270,12 +282,12 @@ def _render_cpp_test(target: FieldTarget, constants: dict[str, int], seed: int, 
     """
 
 
-def _run_adaptive_case(case_name: str, randomize: bool) -> None:
+def _run_adaptive_case(case_name: str, randomize: bool, source_rdl: Path | None = None) -> None:
     case_dir = _reset_case_dir(case_name)
-    source_rdl = _resolve_rdl_path()
-    if not source_rdl.exists():
+    resolved_rdl = source_rdl if source_rdl is not None else _resolve_rdl_path()
+    if not resolved_rdl.exists():
         pytest.skip(
-            f"Configured RDL file does not exist: {source_rdl}. "
+            f"Configured RDL file does not exist: {resolved_rdl}. "
             f"Set {RDL_PATH_ENV} to a valid design path."
         )
 
@@ -284,7 +296,7 @@ def _run_adaptive_case(case_name: str, randomize: bool) -> None:
     cpp_file = case_dir / "test.cpp"
     exe_file = case_dir / "test_bin"
 
-    shutil.copyfile(source_rdl, rdl_file)
+    shutil.copyfile(resolved_rdl, rdl_file)
 
     top = _compile_top(rdl_file)
 
@@ -315,3 +327,17 @@ def test_adaptive_generate_compile_and_run_deterministic() -> None:
 
 def test_adaptive_generate_compile_and_run_randomized() -> None:
     _run_adaptive_case(case_name="adaptive_randomized", randomize=True)
+
+
+@pytest.mark.parametrize(
+    "fixture_rdl",
+    _fixture_rdl_files(),
+    ids=lambda p: _fixture_case_id(p),
+)
+def test_adaptive_generate_compile_and_run_fixture_rdls(fixture_rdl: Path) -> None:
+    case_id = _fixture_case_id(fixture_rdl)
+    _run_adaptive_case(
+        case_name=f"adaptive_fixture_{case_id}",
+        randomize=False,
+        source_rdl=fixture_rdl,
+    )
