@@ -1,0 +1,5 @@
+addrmap abc_top {
+  reg {
+    field { sw=rw; } f[7:0] = 8'h00;
+  } r0 @0x0;
+};
