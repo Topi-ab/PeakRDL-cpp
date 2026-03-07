@@ -241,6 +241,7 @@ class CppExporter:
                 f"Unsupported accesswidth={access_width}. "
                 "Supported values are 8, 16, 32, or 64."
             )
+        self._check_register_address_spans(top_node, access_width)
 
         namespace_name = _sanitize_identifier(namespace or top_node.inst_name)
         top_class_name = _sanitize_identifier(class_name or _to_class_case(top_node.inst_name))
@@ -275,6 +276,23 @@ class CppExporter:
         walk(top_node)
         return widths
 
+    @staticmethod
+    def _check_register_address_spans(top_node: AddrmapNode, access_width: int) -> None:
+        access_bytes = access_width // 8
+        top_base = int(top_node.absolute_address)
+
+        for node in top_node.descendants(unroll=True):
+            if not isinstance(node, RegNode):
+                continue
+
+            rel_addr = int(node.absolute_address) - top_base
+            _check_addr_range_fits(
+                rel_addr,
+                node.get_path(),
+                span_bytes=access_bytes,
+                span_desc=f"accesswidth={access_width}",
+            )
+
 
 class _ModelBuilder:
     def __init__(self, top_node: AddrmapNode, access_width: int):
@@ -292,14 +310,6 @@ class _ModelBuilder:
             class_name=top_class,
             is_top=True,
         )
-
-    @staticmethod
-    def _check_addr_fits(value: int, context: str) -> None:
-        max_addr = (1 << 32) - 1
-        if value < 0 or value > max_addr:
-            raise ValueError(
-                f"Address/offset overflow at '{context}': value 0x{value:X} does not fit addr_t (std::uint32_t)."
-            )
 
     def _build_container(
         self,
@@ -354,9 +364,9 @@ class _ModelBuilder:
 
                 first = indexed[0]
                 base_offset = first.absolute_address - inst_node.absolute_address
-                self._check_addr_fits(base_offset, f"{child_def.get_path()}[0]")
-                self._check_addr_fits(stride, f"{child_def.get_path()} stride")
-                self._check_addr_fits(
+                _check_addr_range_fits(base_offset, f"{child_def.get_path()}[0]")
+                _check_addr_range_fits(stride, f"{child_def.get_path()} stride")
+                _check_addr_range_fits(
                     base_offset + (count - 1) * stride,
                     f"{child_def.get_path()} last element offset",
                 )
@@ -399,7 +409,7 @@ class _ModelBuilder:
                     )
 
                 offset = concrete.absolute_address - inst_node.absolute_address
-                self._check_addr_fits(offset, child_def.get_path())
+                _check_addr_range_fits(offset, child_def.get_path())
                 if isinstance(child_def, RegNode):
                     reg_class = self._class_name(def_path + (child_def.inst_name,), "reg")
                     target = self._build_register(child_def, concrete, reg_class)
@@ -1361,6 +1371,32 @@ def _sanitize_identifier(name: str) -> str:
     if cleaned in CPP_KEYWORDS or keyword.iskeyword(cleaned):
         cleaned = f"{cleaned}_"
     return cleaned
+
+
+def _check_addr_range_fits(
+    start_addr: int,
+    context: str,
+    *,
+    span_bytes: int = 1,
+    span_desc: Optional[str] = None,
+) -> None:
+    if span_bytes < 1:
+        raise ValueError(f"Invalid address span at '{context}': span_bytes must be >= 1")
+
+    max_addr = (1 << 32) - 1
+    max_start = max_addr - (span_bytes - 1)
+    if start_addr < 0 or start_addr > max_start:
+        if span_bytes == 1:
+            raise ValueError(
+                f"Address/offset overflow at '{context}': value 0x{start_addr:X} does not fit addr_t (std::uint32_t)."
+            )
+
+        end_addr = start_addr + span_bytes - 1
+        span_detail = span_desc if span_desc is not None else f"span_bytes={span_bytes}"
+        raise ValueError(
+            f"Address span overflow at '{context}': {span_detail} requires bytes [0x{start_addr:X}..0x{end_addr:X}], "
+            "which does not fit addr_t (std::uint32_t)."
+        )
 
 
 def _to_class_case(name: str) -> str:

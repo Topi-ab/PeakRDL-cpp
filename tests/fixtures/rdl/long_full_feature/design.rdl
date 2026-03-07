@@ -1,0 +1,783 @@
+default regwidth = 32;
+default accesswidth = 32;
+
+regfile leaf_t {
+    reg {
+        field { sw=rw; reset=0x0; } enable[0:0];
+        field { sw=rw; reset=0x0; } mode[3:1];
+        field { sw=r; reset=0x0; } status[7:4];
+        field { sw=w; reset=0x0; } kick[15:8];
+        field { sw=rw1; reset=0x0; } latch[19:16];
+        field { sw=w1; reset=0x0; } trig[23:20];
+        field { sw=rw; singlepulse; reset=0x0; } pulse[24:24];
+    } control @0x00;
+
+    reg {
+        field { sw=rw; onread=rclr; reset=0x0; } rc0[0:0];
+        field { sw=rw; onread=rset; reset=0x0; } rs0[1:1];
+        field { sw=r; reset=0x0; } sticky[7:2];
+    } status @0x04;
+
+    reg {
+        field { sw=rw; reset=0x11223344; } value[31:0];
+    } value_reg[4] @0x10 += 0x4;
+    reg {
+        field { sw=rw; reset=0x00; } cfg_lo[7:0];
+        field { sw=rw; reset=0x00; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_00 @0x40;
+
+    reg {
+        field { sw=rw; reset=0x03; } cfg_lo[7:0];
+        field { sw=rw; reset=0x07; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_01 @0x44;
+
+    reg {
+        field { sw=rw; reset=0x06; } cfg_lo[7:0];
+        field { sw=rw; reset=0x0E; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_02 @0x48;
+
+    reg {
+        field { sw=rw; reset=0x09; } cfg_lo[7:0];
+        field { sw=rw; reset=0x15; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_03 @0x4C;
+
+    reg {
+        field { sw=rw; reset=0x0C; } cfg_lo[7:0];
+        field { sw=rw; reset=0x1C; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_04 @0x50;
+
+    reg {
+        field { sw=rw; reset=0x0F; } cfg_lo[7:0];
+        field { sw=rw; reset=0x23; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_05 @0x54;
+
+    reg {
+        field { sw=rw; reset=0x12; } cfg_lo[7:0];
+        field { sw=rw; reset=0x2A; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_06 @0x58;
+
+    reg {
+        field { sw=rw; reset=0x15; } cfg_lo[7:0];
+        field { sw=rw; reset=0x31; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_07 @0x5C;
+
+    reg {
+        field { sw=rw; reset=0x18; } cfg_lo[7:0];
+        field { sw=rw; reset=0x38; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_08 @0x60;
+
+    reg {
+        field { sw=rw; reset=0x1B; } cfg_lo[7:0];
+        field { sw=rw; reset=0x3F; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_09 @0x64;
+
+    reg {
+        field { sw=rw; reset=0x1E; } cfg_lo[7:0];
+        field { sw=rw; reset=0x46; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_10 @0x68;
+
+    reg {
+        field { sw=rw; reset=0x21; } cfg_lo[7:0];
+        field { sw=rw; reset=0x4D; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_11 @0x6C;
+
+    reg {
+        field { sw=rw; reset=0x24; } cfg_lo[7:0];
+        field { sw=rw; reset=0x54; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_12 @0x70;
+
+    reg {
+        field { sw=rw; reset=0x27; } cfg_lo[7:0];
+        field { sw=rw; reset=0x5B; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_13 @0x74;
+
+    reg {
+        field { sw=rw; reset=0x2A; } cfg_lo[7:0];
+        field { sw=rw; reset=0x62; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_14 @0x78;
+
+    reg {
+        field { sw=rw; reset=0x2D; } cfg_lo[7:0];
+        field { sw=rw; reset=0x69; } cfg_hi[15:8];
+        field { sw=r;  reset=0x00; } ro_dbg[23:16];
+        field { sw=w;  reset=0x00; } wo_cmd[31:24];
+    } leaf_cfg_15 @0x7C;
+
+};
+
+regfile block_t {
+    reg {
+        field { sw=rw; reset=0xAA; } threshold[7:0];
+        field { sw=r; reset=0x00; } count[15:8];
+        field { sw=w; reset=0x00; } arm[23:16];
+        field { sw=rw; singlepulse; reset=0x0; } restart[24:24];
+    } cfg @0x00;
+
+    reg {
+        field { sw=rw; onread=rclr; reset=0x0; } evt_rc[0:0];
+        field { sw=rw; onread=rset; reset=0x0; } evt_rs[1:1];
+        field { sw=r; reset=0x0; } evt_sticky[7:2];
+    } event_status @0x04;
+
+    leaf_t leaf[3] @0x400 += 0x100;
+    reg {
+        field { sw=rw; reset=0x0000; } table_a[15:0];
+        field { sw=rw; reset=0x0000; } table_b[31:16];
+    } table_00 @0x10;
+
+    reg {
+        field { sw=rw; reset=0x0101; } table_a[15:0];
+        field { sw=rw; reset=0x038F; } table_b[31:16];
+    } table_01 @0x14;
+
+    reg {
+        field { sw=rw; reset=0x0202; } table_a[15:0];
+        field { sw=rw; reset=0x071E; } table_b[31:16];
+    } table_02 @0x18;
+
+    reg {
+        field { sw=rw; reset=0x0303; } table_a[15:0];
+        field { sw=rw; reset=0x0AAD; } table_b[31:16];
+    } table_03 @0x1C;
+
+    reg {
+        field { sw=rw; reset=0x0404; } table_a[15:0];
+        field { sw=rw; reset=0x0E3C; } table_b[31:16];
+    } table_04 @0x20;
+
+    reg {
+        field { sw=rw; reset=0x0505; } table_a[15:0];
+        field { sw=rw; reset=0x11CB; } table_b[31:16];
+    } table_05 @0x24;
+
+    reg {
+        field { sw=rw; reset=0x0606; } table_a[15:0];
+        field { sw=rw; reset=0x155A; } table_b[31:16];
+    } table_06 @0x28;
+
+    reg {
+        field { sw=rw; reset=0x0707; } table_a[15:0];
+        field { sw=rw; reset=0x18E9; } table_b[31:16];
+    } table_07 @0x2C;
+
+    reg {
+        field { sw=rw; reset=0x0808; } table_a[15:0];
+        field { sw=rw; reset=0x1C78; } table_b[31:16];
+    } table_08 @0x30;
+
+    reg {
+        field { sw=rw; reset=0x0909; } table_a[15:0];
+        field { sw=rw; reset=0x2007; } table_b[31:16];
+    } table_09 @0x34;
+
+    reg {
+        field { sw=rw; reset=0x0A0A; } table_a[15:0];
+        field { sw=rw; reset=0x2396; } table_b[31:16];
+    } table_10 @0x38;
+
+    reg {
+        field { sw=rw; reset=0x0B0B; } table_a[15:0];
+        field { sw=rw; reset=0x2725; } table_b[31:16];
+    } table_11 @0x3C;
+
+    reg {
+        field { sw=rw; reset=0x0C0C; } table_a[15:0];
+        field { sw=rw; reset=0x2AB4; } table_b[31:16];
+    } table_12 @0x40;
+
+    reg {
+        field { sw=rw; reset=0x0D0D; } table_a[15:0];
+        field { sw=rw; reset=0x2E43; } table_b[31:16];
+    } table_13 @0x44;
+
+    reg {
+        field { sw=rw; reset=0x0E0E; } table_a[15:0];
+        field { sw=rw; reset=0x31D2; } table_b[31:16];
+    } table_14 @0x48;
+
+    reg {
+        field { sw=rw; reset=0x0F0F; } table_a[15:0];
+        field { sw=rw; reset=0x3561; } table_b[31:16];
+    } table_15 @0x4C;
+
+    reg {
+        field { sw=rw; reset=0x1010; } table_a[15:0];
+        field { sw=rw; reset=0x38F0; } table_b[31:16];
+    } table_16 @0x50;
+
+    reg {
+        field { sw=rw; reset=0x1111; } table_a[15:0];
+        field { sw=rw; reset=0x3C7F; } table_b[31:16];
+    } table_17 @0x54;
+
+    reg {
+        field { sw=rw; reset=0x1212; } table_a[15:0];
+        field { sw=rw; reset=0x400E; } table_b[31:16];
+    } table_18 @0x58;
+
+    reg {
+        field { sw=rw; reset=0x1313; } table_a[15:0];
+        field { sw=rw; reset=0x439D; } table_b[31:16];
+    } table_19 @0x5C;
+
+    reg {
+        field { sw=rw; reset=0x1414; } table_a[15:0];
+        field { sw=rw; reset=0x472C; } table_b[31:16];
+    } table_20 @0x60;
+
+    reg {
+        field { sw=rw; reset=0x1515; } table_a[15:0];
+        field { sw=rw; reset=0x4ABB; } table_b[31:16];
+    } table_21 @0x64;
+
+    reg {
+        field { sw=rw; reset=0x1616; } table_a[15:0];
+        field { sw=rw; reset=0x4E4A; } table_b[31:16];
+    } table_22 @0x68;
+
+    reg {
+        field { sw=rw; reset=0x1717; } table_a[15:0];
+        field { sw=rw; reset=0x51D9; } table_b[31:16];
+    } table_23 @0x6C;
+
+};
+
+regfile channel_t {
+    reg {
+        field { sw=rw; reset=0x0100; } base[15:0];
+        field { sw=rw; reset=0x01; } gain[23:16];
+        field { sw=rw; reset=0x0; } profile[27:24];
+        field { sw=r; reset=0x0; } state[31:28];
+    } chan_cfg @0x00;
+
+    reg {
+        field { sw=rw; reset=0x0; } plain_rw[0:0];
+        field { sw=rw; reset=0x0; } plain_data[7:1];
+        field { sw=r; reset=0x00; } snapshot[15:8];
+        field { sw=w; reset=0x00; } sw_cmd[23:16];
+    } probe @0x04;
+
+    reg {
+        field { sw=rw; reset=0x20; } t[7:0];
+    } threshold[8] @0x20 += 0x4;
+
+    reg {
+        field { sw=rw; reset=0x0; } accum[31:0];
+    } accum[8] @0x60 += 0x4;
+
+    block_t block[2] @0x100 += 0x800;
+    reg {
+        field { sw=rw; reset=0x00; } c0[7:0];
+        field { sw=rw; reset=0x00; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_00 @0x90;
+
+    reg {
+        field { sw=rw; reset=0x0B; } c0[7:0];
+        field { sw=rw; reset=0x0D; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_01 @0x94;
+
+    reg {
+        field { sw=rw; reset=0x16; } c0[7:0];
+        field { sw=rw; reset=0x1A; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_02 @0x98;
+
+    reg {
+        field { sw=rw; reset=0x21; } c0[7:0];
+        field { sw=rw; reset=0x27; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_03 @0x9C;
+
+    reg {
+        field { sw=rw; reset=0x2C; } c0[7:0];
+        field { sw=rw; reset=0x34; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_04 @0xA0;
+
+    reg {
+        field { sw=rw; reset=0x37; } c0[7:0];
+        field { sw=rw; reset=0x41; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_05 @0xA4;
+
+    reg {
+        field { sw=rw; reset=0x42; } c0[7:0];
+        field { sw=rw; reset=0x4E; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_06 @0xA8;
+
+    reg {
+        field { sw=rw; reset=0x4D; } c0[7:0];
+        field { sw=rw; reset=0x5B; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_07 @0xAC;
+
+    reg {
+        field { sw=rw; reset=0x58; } c0[7:0];
+        field { sw=rw; reset=0x68; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_08 @0xB0;
+
+    reg {
+        field { sw=rw; reset=0x63; } c0[7:0];
+        field { sw=rw; reset=0x75; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_09 @0xB4;
+
+    reg {
+        field { sw=rw; reset=0x6E; } c0[7:0];
+        field { sw=rw; reset=0x82; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_10 @0xB8;
+
+    reg {
+        field { sw=rw; reset=0x79; } c0[7:0];
+        field { sw=rw; reset=0x8F; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_11 @0xBC;
+
+    reg {
+        field { sw=rw; reset=0x84; } c0[7:0];
+        field { sw=rw; reset=0x9C; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_12 @0xC0;
+
+    reg {
+        field { sw=rw; reset=0x8F; } c0[7:0];
+        field { sw=rw; reset=0xA9; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_13 @0xC4;
+
+    reg {
+        field { sw=rw; reset=0x9A; } c0[7:0];
+        field { sw=rw; reset=0xB6; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_14 @0xC8;
+
+    reg {
+        field { sw=rw; reset=0xA5; } c0[7:0];
+        field { sw=rw; reset=0xC3; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_15 @0xCC;
+
+    reg {
+        field { sw=rw; reset=0xB0; } c0[7:0];
+        field { sw=rw; reset=0xD0; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_16 @0xD0;
+
+    reg {
+        field { sw=rw; reset=0xBB; } c0[7:0];
+        field { sw=rw; reset=0xDD; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_17 @0xD4;
+
+    reg {
+        field { sw=rw; reset=0xC6; } c0[7:0];
+        field { sw=rw; reset=0xEA; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_18 @0xD8;
+
+    reg {
+        field { sw=rw; reset=0xD1; } c0[7:0];
+        field { sw=rw; reset=0xF7; } c1[15:8];
+        field { sw=r; reset=0x00; } c2[23:16];
+        field { sw=w; reset=0x00; } c3[31:24];
+    } chan_extra_19 @0xDC;
+
+};
+
+regfile telemetry_t {
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x00; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_00 @0x0;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x09; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_01 @0x4;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x12; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_02 @0x8;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x1B; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_03 @0xC;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x24; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_04 @0x10;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x2D; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_05 @0x14;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x36; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_06 @0x18;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x3F; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_07 @0x1C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x48; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_08 @0x20;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x51; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_09 @0x24;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x5A; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_10 @0x28;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x63; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_11 @0x2C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x6C; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_12 @0x30;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x75; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_13 @0x34;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x7E; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_14 @0x38;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x87; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_15 @0x3C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x90; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_16 @0x40;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x99; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_17 @0x44;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xA2; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_18 @0x48;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xAB; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_19 @0x4C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xB4; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_20 @0x50;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xBD; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_21 @0x54;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xC6; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_22 @0x58;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xCF; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_23 @0x5C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xD8; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_24 @0x60;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xE1; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_25 @0x64;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xEA; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_26 @0x68;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xF3; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_27 @0x6C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0xFC; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_28 @0x70;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x05; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_29 @0x74;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x0E; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_30 @0x78;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x17; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_31 @0x7C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x20; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_32 @0x80;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x29; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_33 @0x84;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x32; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_34 @0x88;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x3B; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_35 @0x8C;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x44; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_36 @0x90;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x4D; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_37 @0x94;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x56; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_38 @0x98;
+
+    reg {
+        field { sw=r;  reset=0x00; } count[7:0];
+        field { sw=r;  reset=0x00; } flags[15:8];
+        field { sw=rw; reset=0x5F; } clear_mask[23:16];
+        field { sw=rw1; reset=0x0; } ack[27:24];
+        field { sw=w1;  reset=0x0; } inject[31:28];
+    } telem_39 @0x9C;
+
+};
+
+addrmap long_feature_root {
+    reg {
+        field { sw=rw; reset=0x1234; } id[15:0];
+        field { sw=r; reset=0xABCD; } rev[31:16];
+    } top_info @0x0000;
+
+    reg {
+        field { sw=rw; reset=0x0; } plain_rw[0:0];
+        field { sw=rw; reset=0x0; } plain_data[7:1];
+        field { sw=r; reset=0x00; } monitor[15:8];
+        field { sw=w; reset=0x00; } issue[23:16];
+    } probe @0x0004;
+
+    reg {
+        field { sw=rw; reset=0x00; } win[7:0];
+    } top_window[16] @0x0040 += 0x4;
+
+    channel_t chan[4] @0x0200 += 0x2000;
+    telemetry_t tmon[2] @0x9000 += 0x0800;
+};

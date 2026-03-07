@@ -432,6 +432,29 @@ def test_generation_fails_on_address_offset_overflow() -> None:
         CppExporter().export(top, out_file, namespace="demo", class_name="Top")
 
 
+def test_generation_fails_on_access_span_overflow_for_64bit_access() -> None:
+    case_dir = _reset_case_dir("address_span_overflow_64")
+
+    rdl_text = """
+    addrmap top {
+      reg {
+        accesswidth = 64;
+        regwidth = 64;
+        field { sw=rw; } f[63:0] = 64'h0;
+      } r0 @0xFFFFFFFE;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    out_file = case_dir / "regs.hpp"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+
+    with pytest.raises(ValueError, match="Address span overflow"):
+        CppExporter().export(top, out_file, namespace="demo", class_name="Top")
+
+
 def test_generation_fails_on_shadow_impl_name_conflict() -> None:
     case_dir = _reset_case_dir("shadow_impl_name_conflict")
 
