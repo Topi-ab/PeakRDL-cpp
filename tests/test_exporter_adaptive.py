@@ -261,9 +261,10 @@ def _render_cpp_test(target: FieldTarget, constants: dict[str, int], seed: int, 
         demo::data_t read_value = {target.field_path_cpp}.read();
         demo::data_t expected_read = static_cast<demo::data_t>((kHwReadRaw & kFieldMask) >> kFieldShift);
         assert(read_value == expected_read);
-        assert({target.field_path_cpp}.shadow.read() == expected_read);
+        assert({target.field_path_cpp}.rd_shadow.read() == expected_read);
+        assert({target.field_path_cpp}.wr_shadow.read() == expected_read);
 
-        demo::data_t shadow_before = {target.field_path_cpp}.shadow.read();
+        demo::data_t shadow_before = {target.field_path_cpp}.wr_shadow.read();
         demo::data_t shadow_write_value = static_cast<demo::data_t>(
             (shadow_before ^ static_cast<demo::data_t>(1u)) & kFieldValueMask
         );
@@ -274,11 +275,13 @@ def _render_cpp_test(target: FieldTarget, constants: dict[str, int], seed: int, 
         }}
         assert(shadow_write_value != shadow_before);
 
-        {target.field_path_cpp}.shadow.write(shadow_write_value);
-        assert({target.reg_path_cpp}.shadow.dirty());
+        {target.field_path_cpp}.wr_shadow.write(shadow_write_value);
+        assert({target.reg_path_cpp}.wr_shadow.dirty());
+        assert({target.field_path_cpp}.wr_shadow.read() == shadow_write_value);
+        assert({target.field_path_cpp}.rd_shadow.read() == expected_read);
 
         std::uint64_t writes_before = bus.write_count[kRegAddr];
-        {target.reg_path_cpp}.shadow.flush();
+        {target.reg_path_cpp}.wr_shadow.flush();
         assert(bus.write_count[kRegAddr] == writes_before + 1);
         assert((bus.mem[kRegAddr] & kFieldMask) == ((shadow_write_value << kFieldShift) & kFieldMask));
 

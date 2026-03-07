@@ -27,17 +27,20 @@ int main() {
     my_root.regfile_1[0].sub_regfile.example_reg.enable.write(1u);
 
     // Shadow update only. No HW write yet.
-    my_root.regfile_1[0].sub_regfile.example_reg.mode.shadow.write(3u);
-    std::cout << "mode shadow = "
-              << my_root.regfile_1[0].sub_regfile.example_reg.mode.shadow.read()
+    my_root.regfile_1[0].sub_regfile.example_reg.mode.wr_shadow.write(3u);
+    std::cout << "mode wr_shadow = "
+              << my_root.regfile_1[0].sub_regfile.example_reg.mode.wr_shadow.read()
               << "\n";
 
     // Flush all dirty regs in this regfile element.
-    my_root.regfile_1[0].shadow.flush();
+    my_root.regfile_1[0].wr_shadow.flush();
 
     // Hardware read updates shadow for all fields in the register.
     std::uint64_t mode_hw = my_root.regfile_1[0].sub_regfile.example_reg.mode.read();
     std::cout << "mode hw = " << mode_hw << "\n";
+    std::cout << "mode rd_shadow = "
+              << my_root.regfile_1[0].sub_regfile.example_reg.mode.rd_shadow.read()
+              << "\n";
 
     return 0;
 }

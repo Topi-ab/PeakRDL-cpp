@@ -167,44 +167,44 @@ def test_end_to_end_generate_compile_and_run() -> None:
         assert(bus.read_count[kExampleRegAddr] == reads_before_wo_write);
         assert(bus.mem[kExampleRegAddr] == 0x5A3ull);
 
-        std::uint64_t wof_shadow_before = my_root.regfile_1[3].sub_regfile.example_reg.wof.shadow.read();
+        std::uint64_t wof_shadow_before = my_root.regfile_1[3].sub_regfile.example_reg.wof.rd_shadow.read();
         bus.mem[kExampleRegAddr] = 0x2F3ull;
         std::uint64_t rwf_read = my_root.regfile_1[3].sub_regfile.example_reg.rwf.read();
         assert(rwf_read == 0x3ull);
-        assert(my_root.regfile_1[3].sub_regfile.example_reg.wof.shadow.read() == wof_shadow_before);
+        assert(my_root.regfile_1[3].sub_regfile.example_reg.wof.rd_shadow.read() == wof_shadow_before);
 
-        my_root.regfile_1[3].sub_regfile.example_reg.rwf.shadow.write(std::uint64_t{{0x9}});
-        my_root.regfile_1[3].sub_regfile.example_reg.wof.shadow.write(std::uint64_t{{0x3}});
-        assert(my_root.regfile_1[3].sub_regfile.example_reg.shadow.dirty());
+        my_root.regfile_1[3].sub_regfile.example_reg.rwf.wr_shadow.write(std::uint64_t{{0x9}});
+        my_root.regfile_1[3].sub_regfile.example_reg.wof.wr_shadow.write(std::uint64_t{{0x3}});
+        assert(my_root.regfile_1[3].sub_regfile.example_reg.wr_shadow.dirty());
 
         std::uint64_t writes_before_flush = bus.write_count[kExampleRegAddr];
-        my_root.regfile_1[3].shadow.flush();
+        my_root.regfile_1[3].wr_shadow.flush();
         assert(bus.write_count[kExampleRegAddr] == writes_before_flush + 1);
         assert(bus.mem[kExampleRegAddr] == 0x3F9ull);
 
         std::uint64_t writes_before_flush_always = bus.write_count[kExampleRegAddr];
-        my_root.regfile_1[3].sub_regfile.example_reg.shadow.flush_always();
+        my_root.regfile_1[3].sub_regfile.example_reg.wr_shadow.flush_always();
         assert(bus.write_count[kExampleRegAddr] == writes_before_flush_always + 1);
-        assert(!my_root.regfile_1[3].sub_regfile.example_reg.shadow.dirty());
+        assert(!my_root.regfile_1[3].sub_regfile.example_reg.wr_shadow.dirty());
 
-        my_root.regfile_1[3].sub_regfile.example_reg.pulse.shadow.write(std::uint64_t{{1}});
-        my_root.regfile_1[3].sub_regfile.example_reg.shadow.flush();
-        assert(my_root.regfile_1[3].sub_regfile.example_reg.pulse.shadow.read() == 0u);
+        my_root.regfile_1[3].sub_regfile.example_reg.pulse.wr_shadow.write(std::uint64_t{{1}});
+        my_root.regfile_1[3].sub_regfile.example_reg.wr_shadow.flush();
+        assert(my_root.regfile_1[3].sub_regfile.example_reg.pulse.rd_shadow.read() == 0u);
 
         bus.mem[kStatusRegAddr] = 0x3ull;
         std::uint64_t rc = my_root.regfile_1[3].sub_regfile.status_reg.rc.read();
         assert(rc == 1u);
-        assert(my_root.regfile_1[3].sub_regfile.status_reg.rc.shadow.read() == 1u);
-        assert(my_root.regfile_1[3].sub_regfile.status_reg.rs.shadow.read() == 1u);
+        assert(my_root.regfile_1[3].sub_regfile.status_reg.rc.rd_shadow.read() == 1u);
+        assert(my_root.regfile_1[3].sub_regfile.status_reg.rs.rd_shadow.read() == 1u);
 
         std::uint64_t unsupported_reads_before = bus.read_count[kUnsupportedRegAddr];
-        my_root.shadow.read_hw();
+        my_root.rd_shadow.read_hw();
         assert(bus.read_count[kUnsupportedRegAddr] == unsupported_reads_before);
 
         std::uint64_t unsupported_writes_before = bus.write_count[kUnsupportedRegAddr];
-        my_root.shadow.flush();
+        my_root.wr_shadow.flush();
         assert(bus.write_count[kUnsupportedRegAddr] == unsupported_writes_before);
-        my_root.shadow.flush_always();
+        my_root.wr_shadow.flush_always();
         assert(bus.write_count[kUnsupportedRegAddr] == unsupported_writes_before);
 
         assert(my_root.ok());
@@ -399,23 +399,27 @@ def test_shadow_read_uses_read_shadow_not_write_shadow() -> None:
         constexpr std::uint64_t kAddr = 0x0ull;
         bus.mem[kAddr] = 0x0ull;
 
-        root.r0.f.shadow.write(std::uint64_t{{5}});
-        assert(root.r0.shadow.dirty());
-        assert(root.r0.f.shadow.read() == 0u);
+        root.r0.f.wr_shadow.write(std::uint64_t{{5}});
+        assert(root.r0.wr_shadow.dirty());
+        assert(root.r0.f.rd_shadow.read() == 0u);
+        assert(root.r0.f.wr_shadow.read() == 5u);
 
         bus.mem[kAddr] = 0x9ull;
         assert(root.r0.f.read() == 0x9ull);
-        assert(root.r0.f.shadow.read() == 0x9ull);
+        assert(root.r0.f.rd_shadow.read() == 0x9ull);
+        assert(root.r0.f.wr_shadow.read() == 0x9ull);
 
-        root.r0.f.shadow.write(std::uint64_t{{3}});
-        assert(root.r0.f.shadow.read() == 0x9ull);
+        root.r0.f.wr_shadow.write(std::uint64_t{{3}});
+        assert(root.r0.f.rd_shadow.read() == 0x9ull);
+        assert(root.r0.f.wr_shadow.read() == 0x3ull);
 
-        root.r0.shadow.flush();
+        root.r0.wr_shadow.flush();
         assert(bus.mem[kAddr] == 0x3ull);
-        assert(root.r0.f.shadow.read() == 0x9ull);
+        assert(root.r0.f.rd_shadow.read() == 0x9ull);
+        assert(root.r0.f.wr_shadow.read() == 0x3ull);
 
-        root.r0.shadow.read_hw();
-        assert(root.r0.f.shadow.read() == 0x3ull);
+        root.r0.rd_shadow.read_hw();
+        assert(root.r0.f.rd_shadow.read() == 0x3ull);
         assert(root.ok());
         return 0;
     }}
@@ -614,14 +618,14 @@ def test_generation_fails_on_access_span_overflow_for_64bit_access() -> None:
         CppExporter().export(top, out_file, namespace="demo", class_name="Top")
 
 
-def test_generation_fails_on_shadow_impl_name_conflict() -> None:
-    case_dir = _reset_case_dir("shadow_impl_name_conflict")
+def test_generation_fails_on_wr_shadow_impl_name_conflict() -> None:
+    case_dir = _reset_case_dir("wr_shadow_impl_name_conflict")
 
     rdl_text = """
     addrmap top {
       reg {
         field { sw=rw; } f[0:0] = 1'b0;
-      } shadow_flush_impl @0x0;
+      } wr_shadow_flush_impl @0x0;
     };
     """
 
@@ -635,14 +639,14 @@ def test_generation_fails_on_shadow_impl_name_conflict() -> None:
         CppExporter().export(top, out_file, namespace="demo", class_name="Top")
 
 
-def test_generation_fails_on_shadow_flush_always_impl_name_conflict() -> None:
-    case_dir = _reset_case_dir("shadow_flush_always_impl_name_conflict")
+def test_generation_fails_on_wr_shadow_flush_always_impl_name_conflict() -> None:
+    case_dir = _reset_case_dir("wr_shadow_flush_always_impl_name_conflict")
 
     rdl_text = """
     addrmap top {
       reg {
         field { sw=rw; } f[0:0] = 1'b0;
-      } shadow_flush_always_impl @0x0;
+      } wr_shadow_flush_always_impl @0x0;
     };
     """
 
@@ -662,7 +666,7 @@ def test_generation_fails_on_reserved_name_conflict() -> None:
     rdl_text = """
     addrmap top {
       reg {
-        field { sw=rw; } shadow[0:0] = 1'b0;
+        field { sw=rw; } rd_shadow[0:0] = 1'b0;
       } r0 @0x0;
     };
     """

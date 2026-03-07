@@ -27,3 +27,9 @@ peakrdl cpp examples/basic/design.rdl \
 g++ -std=c++20 -Iexamples/basic examples/basic/main.cpp -o examples/basic/demo_example
 ./examples/basic/demo_example
 ```
+
+The example uses the split shadow APIs:
+
+- `field.wr_shadow.write(...)` / `field.wr_shadow.read()`
+- `field.rd_shadow.read()`
+- `...wr_shadow.flush()`

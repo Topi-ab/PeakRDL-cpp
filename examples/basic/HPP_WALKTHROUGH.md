@@ -52,8 +52,8 @@ This is the core register engine. It owns:
 - register address computation
 - HW read path
 - direct write path (`field.write()`)
-- staged write path (`field.shadow.write()`)
-- shadow operations (`read_hw`, `flush`, `flush_always`)
+- staged write path (`field.wr_shadow.write()`)
+- shadow operations (`rd_shadow.read_hw`, `wr_shadow.flush`, `wr_shadow.flush_always`)
 - dirty tracking
 - side-effect behavior (`rclr`, `rset`, `singlepulse`)
 
@@ -64,6 +64,7 @@ Key methods:
 - `flush_always()`
 - `read_field_hw(mask, lsb)`
 - `read_field_shadow(mask, lsb)`
+- `read_field_staged(mask, lsb)`
 - `direct_write_unsigned/signed(...)`
 - `shadow_write_unsigned/signed(...)`
 
@@ -78,11 +79,11 @@ Main API:
 - `read()`
 - `address()`
 - `supports_shadow_write()`
-- nested `shadow` ops:
-  - `read_hw()`
-  - `flush()`
-  - `flush_always()`
-  - `dirty()`
+- nested split shadow ops:
+  - `rd_shadow.read_hw()`
+  - `wr_shadow.flush()`
+  - `wr_shadow.flush_always()`
+  - `wr_shadow.dirty()`
 
 Field objects in this register:
 
@@ -97,7 +98,9 @@ Each field class contains:
 - constants: `LSB`, `MSB`, `WIDTH`, `MASK`, `SW`, `SINGLEPULSE`
 - `read()` only if SW-readable
 - `write(IntT)` only if SW-writable
-- nested `shadow` object with:
+- nested `rd_shadow` object with:
+  - `read()`
+- nested `wr_shadow` object with:
   - `read()`
   - optional `write(IntT)` when writable
 
@@ -105,7 +108,7 @@ Note: old per-field `ONREAD` constants are no longer emitted.
 
 ### 4.1 Signed vs Unsigned Input Dispatch
 
-In both `write(IntT)` and `shadow.write(IntT)`:
+In both `write(IntT)` and `wr_shadow.write(IntT)`:
 
 - `static_assert` requires integral and rejects `bool`
 - `if constexpr (std::is_signed_v<IntT>)` selects signed path
@@ -150,20 +153,27 @@ Field::write(IntT)
       -> singlepulse: clear corresponding shadow bits after write
 ```
 
-### 5.3 `field.shadow.read()` (shadow read path)
+### 5.3 `field.rd_shadow.read()` and `field.wr_shadow.read()`
 
 ```text
-Field::ShadowOps::read()
+Field::RdShadowOps::read()
   -> RegisterState::read_field_shadow(MASK, LSB)
       -> (read_shadow_ & MASK) >> LSB
+
+Field::WrShadowOps::read()
+  -> RegisterState::read_field_staged(MASK, LSB)
+      -> (write_shadow_ & MASK) >> LSB
 ```
 
-Important: `field.shadow.read()` returns bits from register **read-shadow**.
+Important:
 
-### 5.4 `field.shadow.write(value)` (staged write path)
+- `field.rd_shadow.read()` returns register **read-shadow** bits.
+- `field.wr_shadow.read()` returns register **write-shadow** bits.
+
+### 5.4 `field.wr_shadow.write(value)` (staged write path)
 
 ```text
-Field::ShadowOps::write(IntT)
+Field::WrShadowOps::write(IntT)
   -> signed/unsigned compile-time dispatch
   -> RegisterState::shadow_write_signed(...) or shadow_write_unsigned(...)
       -> optional range check
@@ -177,15 +187,15 @@ Important: staged write updates register **write-shadow only**.
 
 Container classes (regfile/addrmap) expose:
 
-- `shadow.read_hw()`
-- `shadow.flush()`
-- `shadow.flush_always()`
+- `rd_shadow.read_hw()`
+- `wr_shadow.flush()`
+- `wr_shadow.flush_always()`
 
 Internal helpers:
 
-- `shadow_read_hw_impl()`
-- `shadow_flush_impl()`
-- `shadow_flush_always_impl()`
+- `rd_shadow_read_hw_impl()`
+- `wr_shadow_flush_impl()`
+- `wr_shadow_flush_always_impl()`
 
 These recurse through children; registers are flushed only if
 `supports_shadow_write()` is true.
@@ -202,7 +212,7 @@ Top-level responsibilities:
 
 - construct hierarchy and arrays (for this design: `regfile_1[2]`)
 - expose status API (`ok()`, `last_error()`, `clear_error()`)
-- expose addrmap shadow operations (`read_hw`, `flush`, `flush_always`)
+- expose addrmap shadow operations (`rd_shadow.read_hw`, `wr_shadow.flush`, `wr_shadow.flush_always`)
 
 ## 8. Mapping To `design.rdl`
 

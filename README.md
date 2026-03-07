@@ -51,19 +51,20 @@ Generated API shape:
   - `sw=r`: no `write()`
   - `sw=w`: no `read()`
 - Shadow API:
-  - `field.shadow.read()` (reads register read-shadow), `field.shadow.write(...)` (updates register write-shadow)
-  - `reg.shadow.read_hw()`, `reg.shadow.flush()`, `reg.shadow.flush_always()`
-  - `regfile.shadow.read_hw()`, `regfile.shadow.flush()`, `regfile.shadow.flush_always()`
-  - `addrmap.shadow.read_hw()`, `addrmap.shadow.flush()`, `addrmap.shadow.flush_always()`
-- Hard generation error on reserved symbol conflicts (for example `shadow`).
+  - `field.rd_shadow.read()` (reads register read-shadow)
+  - `field.wr_shadow.read()` / `field.wr_shadow.write(...)` (reads/updates register write-shadow)
+  - `reg.rd_shadow.read_hw()`, `reg.wr_shadow.flush()`, `reg.wr_shadow.flush_always()`
+  - `regfile.rd_shadow.read_hw()`, `regfile.wr_shadow.flush()`, `regfile.wr_shadow.flush_always()`
+  - `addrmap.rd_shadow.read_hw()`, `addrmap.wr_shadow.flush()`, `addrmap.wr_shadow.flush_always()`
+- Hard generation error on reserved symbol conflicts (for example `rd_shadow` or `wr_shadow`).
 - Error handling style:
   - `--error-style exceptions` throws `std::runtime_error`
   - `--error-style status` records errors and exposes `ok()/last_error()/clear_error()`
   - In `exceptions` mode these status methods still exist, but are mainly useful in `status` mode.
 - Write range validation:
   - enabled by default
-  - disable with `--no-write-range-check` to skip generated runtime range checks on `write()` and `shadow.write()`
-  - `write()`/`shadow.write()` accept both signed and unsigned integral input types regardless of field signedness.
+  - disable with `--no-write-range-check` to skip generated runtime range checks on `write()` and `wr_shadow.write()`
+  - `write()`/`wr_shadow.write()` accept both signed and unsigned integral input types regardless of field signedness.
 - Access width:
   - `data_t` is deduced from SystemRDL `accesswidth`.
   - If more than one numeric `accesswidth` is present in the design, generation fails.

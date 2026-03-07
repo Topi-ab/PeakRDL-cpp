@@ -110,27 +110,33 @@ CPP_KEYWORDS = {
 
 
 _CONTAINER_RESERVED = {
-    "shadow",
-    "ShadowOps",
-    "shadow_read_hw_impl",
-    "shadow_flush_impl",
-    "shadow_flush_always_impl",
+    "rd_shadow",
+    "wr_shadow",
+    "RdShadowOps",
+    "WrShadowOps",
+    "rd_shadow_read_hw_impl",
+    "wr_shadow_flush_impl",
+    "wr_shadow_flush_always_impl",
 }
 _TOP_RESERVED = {
-    "shadow",
-    "ShadowOps",
+    "rd_shadow",
+    "wr_shadow",
+    "RdShadowOps",
+    "WrShadowOps",
     "ok",
     "last_error",
     "clear_error",
     "base_address",
     "kThrowOnError",
-    "shadow_read_hw_impl",
-    "shadow_flush_impl",
-    "shadow_flush_always_impl",
+    "rd_shadow_read_hw_impl",
+    "wr_shadow_flush_impl",
+    "wr_shadow_flush_always_impl",
 }
 _REG_RESERVED = {
-    "shadow",
-    "ShadowOps",
+    "rd_shadow",
+    "wr_shadow",
+    "RdShadowOps",
+    "WrShadowOps",
     "read",
     "supports_shadow_write",
     "address",
@@ -800,6 +806,10 @@ class _Renderer:
         lines.append("        return static_cast<data_t>((read_shadow_ & mask) >> lsb);")
         lines.append("    }")
         lines.append("")
+        lines.append("    data_t read_field_staged(data_t mask, std::uint8_t lsb) const {")
+        lines.append("        return static_cast<data_t>((write_shadow_ & mask) >> lsb);")
+        lines.append("    }")
+        lines.append("")
         lines.append("    void shadow_write_unsigned(")
         lines.append("        data_t mask,")
         lines.append("        std::uint8_t lsb,")
@@ -807,7 +817,7 @@ class _Renderer:
         lines.append("        unsigned_input_t value,")
         lines.append("        const char* field_name) {")
         lines.append("        if (!shadow_write_supported_) {")
-        lines.append("            ctx_.fail(\"field.shadow.write() is unsupported for this register\");")
+        lines.append("            ctx_.fail(\"field.wr_shadow.write() is unsupported for this register\");")
         lines.append("            return;")
         lines.append("        }")
         lines.append("        const data_t limit = bitmask_for_width(width);")
@@ -835,7 +845,7 @@ class _Renderer:
         lines.append("        signed_input_t value,")
         lines.append("        const char* field_name) {")
         lines.append("        if (!shadow_write_supported_) {")
-        lines.append("            ctx_.fail(\"field.shadow.write() is unsupported for this register\");")
+        lines.append("            ctx_.fail(\"field.wr_shadow.write() is unsupported for this register\");")
         lines.append("            return;")
         lines.append("        }")
         lines.append("        if constexpr (kCheckWriteRange) {")
@@ -914,7 +924,7 @@ class _Renderer:
         lines.append("private:")
         lines.append("    void flush_impl(bool only_if_dirty) {")
         lines.append("        if (!shadow_write_supported_) {")
-        lines.append("            ctx_.fail(\"shadow.flush() is unsupported for this register\");")
+        lines.append("            ctx_.fail(\"wr_shadow.flush() is unsupported for this register\");")
         lines.append("            return;")
         lines.append("        }")
         lines.append("        if (only_if_dirty && !dirty_) {")
@@ -1060,7 +1070,7 @@ class _Renderer:
             + ", kShadowWriteSupported"
             + ")"
         )
-        init_parts = [state_ctor, "shadow(this)"]
+        init_parts = [state_ctor, "rd_shadow(this)", "wr_shadow(this)"]
         init_parts.extend(f"{field.cpp_name}(this)" for field in reg.fields)
 
         lines.append("        : " + init_parts[0])
@@ -1074,10 +1084,17 @@ class _Renderer:
         lines.append("    addr_t address() const { return state_.address(); }")
         lines.append("")
 
-        lines.append("    class ShadowOps {")
+        lines.append("    class RdShadowOps {")
         lines.append("    public:")
-        lines.append(f"        explicit ShadowOps({reg.class_name}* owner) : owner_(owner) {{}}")
+        lines.append(f"        explicit RdShadowOps({reg.class_name}* owner) : owner_(owner) {{}}")
         lines.append("        void read_hw() { owner_->state_.shadow_read_hw(); }")
+        lines.append("    private:")
+        lines.append(f"        {reg.class_name}* owner_;")
+        lines.append("    };")
+        lines.append("")
+        lines.append("    class WrShadowOps {")
+        lines.append("    public:")
+        lines.append(f"        explicit WrShadowOps({reg.class_name}* owner) : owner_(owner) {{}}")
         lines.append("        void flush() { owner_->state_.flush(); }")
         lines.append("        void flush_always() { owner_->state_.flush_always(); }")
         lines.append("        bool dirty() const { return owner_->state_.dirty(); }")
@@ -1085,7 +1102,8 @@ class _Renderer:
         lines.append(f"        {reg.class_name}* owner_;")
         lines.append("    };")
         lines.append("")
-        lines.append("    ShadowOps shadow;")
+        lines.append("    RdShadowOps rd_shadow;")
+        lines.append("    WrShadowOps wr_shadow;")
         lines.append("")
 
         for field in reg.fields:
@@ -1119,7 +1137,9 @@ class _Renderer:
             f"        static constexpr bool SINGLEPULSE = {'true' if field.singlepulse else 'false'};"
         )
         lines.append("")
-        lines.append(f"        explicit {cls}({reg.class_name}* owner) : owner_(owner), shadow(this) {{}}")
+        lines.append(
+            f"        explicit {cls}({reg.class_name}* owner) : owner_(owner), rd_shadow(this), wr_shadow(this) {{}}"
+        )
         lines.append("")
 
         if field.readable:
@@ -1151,11 +1171,21 @@ class _Renderer:
             lines.append("        }")
             lines.append("")
 
-        lines.append("        class ShadowOps {")
+        lines.append("        class RdShadowOps {")
         lines.append("        public:")
-        lines.append(f"            explicit ShadowOps({cls}* owner) : owner_(owner) {{}}")
+        lines.append(f"            explicit RdShadowOps({cls}* owner) : owner_(owner) {{}}")
         lines.append("            data_t read() const {")
         lines.append("                return owner_->owner_->state_.read_field_shadow(MASK, LSB);")
+        lines.append("            }")
+        lines.append("        private:")
+        lines.append(f"            {cls}* owner_;")
+        lines.append("        };")
+        lines.append("")
+        lines.append("        class WrShadowOps {")
+        lines.append("        public:")
+        lines.append(f"            explicit WrShadowOps({cls}* owner) : owner_(owner) {{}}")
+        lines.append("            data_t read() const {")
+        lines.append("                return owner_->owner_->state_.read_field_staged(MASK, LSB);")
         lines.append("            }")
         if field.writable:
             lines.append("            template <typename IntT>")
@@ -1164,7 +1194,7 @@ class _Renderer:
                 "                static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
             )
             lines.append(
-                '                    "shadow.write() requires an integral type (excluding bool)");'
+                '                    "wr_shadow.write() requires an integral type (excluding bool)");'
             )
             lines.append("                if constexpr (std::is_signed_v<IntT>) {")
             lines.append(
@@ -1184,7 +1214,8 @@ class _Renderer:
         lines.append(f"            {cls}* owner_;")
         lines.append("        };")
         lines.append("")
-        lines.append("        ShadowOps shadow;")
+        lines.append("        RdShadowOps rd_shadow;")
+        lines.append("        WrShadowOps wr_shadow;")
         lines.append("")
         lines.append("    private:")
         lines.append(f"        {reg.class_name}* owner_;")
@@ -1204,7 +1235,8 @@ class _Renderer:
 
         initializers = ["ctx_(ctx)", "instance_base_offset_(instance_base_offset)"]
         initializers.extend(self._single_child_initializers(container, throw_expr="ThrowOnError"))
-        initializers.append("shadow(this)")
+        initializers.append("rd_shadow(this)")
+        initializers.append("wr_shadow(this)")
 
         lines.append(f"        : {initializers[0]}")
         for init in initializers[1:]:
@@ -1215,23 +1247,24 @@ class _Renderer:
         lines.append("    }")
         lines.append("")
 
-        self._emit_shadow_block(lines, container, top=False)
+        self._emit_rd_shadow_block(lines, container, top=False)
+        self._emit_wr_shadow_block(lines, container, top=False)
 
         for child in container.children:
             lines.append(self._child_member_decl(child, throw_expr="ThrowOnError"))
         lines.append("")
 
         lines.append("private:")
-        lines.append("    void shadow_read_hw_impl() {")
-        self._emit_shadow_read_body(lines, container, top=False)
+        lines.append("    void rd_shadow_read_hw_impl() {")
+        self._emit_rd_shadow_read_body(lines, container, top=False)
         lines.append("    }")
         lines.append("")
-        lines.append("    void shadow_flush_impl() {")
-        self._emit_shadow_flush_body(lines, container, top=False, always=False)
+        lines.append("    void wr_shadow_flush_impl() {")
+        self._emit_wr_shadow_flush_body(lines, container, top=False, always=False)
         lines.append("    }")
         lines.append("")
-        lines.append("    void shadow_flush_always_impl() {")
-        self._emit_shadow_flush_body(lines, container, top=False, always=True)
+        lines.append("    void wr_shadow_flush_always_impl() {")
+        self._emit_wr_shadow_flush_body(lines, container, top=False, always=True)
         lines.append("    }")
         lines.append("};")
         lines.append("")
@@ -1256,7 +1289,8 @@ class _Renderer:
         )
         initializers = ["ctx_(bus, base_address)", "instance_base_offset_(0)"]
         initializers.extend(self._single_child_initializers(top, throw_expr="kThrowOnError"))
-        initializers.append("shadow(this)")
+        initializers.append("rd_shadow(this)")
+        initializers.append("wr_shadow(this)")
 
         lines.append(f"        : {initializers[0]}")
         for init in initializers[1:]:
@@ -1272,23 +1306,24 @@ class _Renderer:
         lines.append("    addr_t base_address() const { return ctx_.base_address; }")
         lines.append("")
 
-        self._emit_shadow_block(lines, top, top=True)
+        self._emit_rd_shadow_block(lines, top, top=True)
+        self._emit_wr_shadow_block(lines, top, top=True)
 
         for child in top.children:
             lines.append(self._child_member_decl(child, throw_expr="kThrowOnError"))
         lines.append("")
 
         lines.append("private:")
-        lines.append("    void shadow_read_hw_impl() {")
-        self._emit_shadow_read_body(lines, top, top=True)
+        lines.append("    void rd_shadow_read_hw_impl() {")
+        self._emit_rd_shadow_read_body(lines, top, top=True)
         lines.append("    }")
         lines.append("")
-        lines.append("    void shadow_flush_impl() {")
-        self._emit_shadow_flush_body(lines, top, top=True, always=False)
+        lines.append("    void wr_shadow_flush_impl() {")
+        self._emit_wr_shadow_flush_body(lines, top, top=True, always=False)
         lines.append("    }")
         lines.append("")
-        lines.append("    void shadow_flush_always_impl() {")
-        self._emit_shadow_flush_body(lines, top, top=True, always=True)
+        lines.append("    void wr_shadow_flush_always_impl() {")
+        self._emit_wr_shadow_flush_body(lines, top, top=True, always=True)
         lines.append("    }")
         lines.append("};")
         lines.append("")
@@ -1330,44 +1365,56 @@ class _Renderer:
                 )
         return out
 
-    def _emit_shadow_block(self, lines: List[str], container: ContainerModel, top: bool) -> None:
+    def _emit_rd_shadow_block(self, lines: List[str], container: ContainerModel, top: bool) -> None:
         owner_type = self.design.top_class_name if top else container.class_name
-        lines.append("    class ShadowOps {")
+        lines.append("    class RdShadowOps {")
         lines.append("    public:")
-        lines.append(f"        explicit ShadowOps({owner_type}* owner) : owner_(owner) {{}}")
-        lines.append("        void read_hw() { owner_->shadow_read_hw_impl(); }")
-        lines.append("        void flush() { owner_->shadow_flush_impl(); }")
-        lines.append("        void flush_always() { owner_->shadow_flush_always_impl(); }")
+        lines.append(f"        explicit RdShadowOps({owner_type}* owner) : owner_(owner) {{}}")
+        lines.append("        void read_hw() { owner_->rd_shadow_read_hw_impl(); }")
         lines.append("    private:")
         lines.append(f"        {owner_type}* owner_;")
         lines.append("    };")
         lines.append("")
-        lines.append("    ShadowOps shadow;")
+        lines.append("    RdShadowOps rd_shadow;")
         lines.append("")
 
-    def _emit_shadow_read_body(self, lines: List[str], container: ContainerModel, top: bool) -> None:
+    def _emit_wr_shadow_block(self, lines: List[str], container: ContainerModel, top: bool) -> None:
+        owner_type = self.design.top_class_name if top else container.class_name
+        lines.append("    class WrShadowOps {")
+        lines.append("    public:")
+        lines.append(f"        explicit WrShadowOps({owner_type}* owner) : owner_(owner) {{}}")
+        lines.append("        void flush() { owner_->wr_shadow_flush_impl(); }")
+        lines.append("        void flush_always() { owner_->wr_shadow_flush_always_impl(); }")
+        lines.append("    private:")
+        lines.append(f"        {owner_type}* owner_;")
+        lines.append("    };")
+        lines.append("")
+        lines.append("    WrShadowOps wr_shadow;")
+        lines.append("")
+
+    def _emit_rd_shadow_read_body(self, lines: List[str], container: ContainerModel, top: bool) -> None:
         for child in container.children:
             if isinstance(child, ChildSingle):
                 target = child.target
                 if isinstance(target, RegisterModel):
                     lines.append(
-                        f"        if ({child.cpp_name}.supports_shadow_write()) {child.cpp_name}.shadow.read_hw();"
+                        f"        if ({child.cpp_name}.supports_shadow_write()) {child.cpp_name}.rd_shadow.read_hw();"
                     )
                 else:
-                    lines.append(f"        {child.cpp_name}.shadow.read_hw();")
+                    lines.append(f"        {child.cpp_name}.rd_shadow.read_hw();")
             else:
                 if isinstance(child.element, RegisterModel):
                     lines.append(f"        for (std::size_t i = 0; i < {child.cpp_name}.size(); ++i) {{")
                     lines.append(f"            auto& elem = {child.cpp_name}[i];")
-                    lines.append("            if (elem.supports_shadow_write()) elem.shadow.read_hw();")
+                    lines.append("            if (elem.supports_shadow_write()) elem.rd_shadow.read_hw();")
                     lines.append("        }")
                 else:
                     lines.append(f"        for (std::size_t i = 0; i < {child.cpp_name}.size(); ++i) {{")
                     lines.append(f"            auto& elem = {child.cpp_name}[i];")
-                    lines.append("            elem.shadow.read_hw();")
+                    lines.append("            elem.rd_shadow.read_hw();")
                     lines.append("        }")
 
-    def _emit_shadow_flush_body(
+    def _emit_wr_shadow_flush_body(
         self,
         lines: List[str],
         container: ContainerModel,
@@ -1380,22 +1427,22 @@ class _Renderer:
                 target = child.target
                 if isinstance(target, RegisterModel):
                     lines.append(
-                        f"        if ({child.cpp_name}.supports_shadow_write()) {child.cpp_name}.shadow.{flush_call}();"
+                        f"        if ({child.cpp_name}.supports_shadow_write()) {child.cpp_name}.wr_shadow.{flush_call}();"
                     )
                 else:
-                    lines.append(f"        {child.cpp_name}.shadow.{flush_call}();")
+                    lines.append(f"        {child.cpp_name}.wr_shadow.{flush_call}();")
             else:
                 if isinstance(child.element, RegisterModel):
                     lines.append(f"        for (std::size_t i = 0; i < {child.cpp_name}.size(); ++i) {{")
                     lines.append(f"            auto& elem = {child.cpp_name}[i];")
                     lines.append(
-                        f"            if (elem.supports_shadow_write()) elem.shadow.{flush_call}();"
+                        f"            if (elem.supports_shadow_write()) elem.wr_shadow.{flush_call}();"
                     )
                     lines.append("        }")
                 else:
                     lines.append(f"        for (std::size_t i = 0; i < {child.cpp_name}.size(); ++i) {{")
                     lines.append(f"            auto& elem = {child.cpp_name}[i];")
-                    lines.append(f"            elem.shadow.{flush_call}();")
+                    lines.append(f"            elem.wr_shadow.{flush_call}();")
                     lines.append("        }")
 
 

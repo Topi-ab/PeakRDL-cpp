@@ -11,11 +11,13 @@ design work.
 2. Field API shape:
    - `field.read()`
    - `field.write(value)` when writable
-   - `field.shadow.read()`
-   - `field.shadow.write(value)` when writable
+   - `field.rd_shadow.read()`
+   - `field.wr_shadow.read()`
+   - `field.wr_shadow.write(value)` when writable
 3. Scope shadow APIs exist at register, regfile, and addrmap scopes:
-   - `.shadow.read_hw()`
-   - `.shadow.flush()`
+   - `.rd_shadow.read_hw()`
+   - `.wr_shadow.flush()`
+   - `.wr_shadow.flush_always()`
 
 ### 1.2 Access rules and field capabilities
 
@@ -30,15 +32,16 @@ design work.
 1. `field.write(value)` is direct hardware write logic using register context.
    - For mixed RW+WO registers, direct write composition preserves WO bits from
      shadow while merging readable bits from hardware read.
-2. `field.shadow.write(value)` updates register write-shadow only.
+2. `field.wr_shadow.write(value)` updates register write-shadow only.
 3. `field.read()` performs a hardware read and updates register read-shadow and write-shadow for readable bits.
-4. `field.shadow.read()` reads register read-shadow.
-5. Dirty flag is tracked per register.
-6. `shadow.flush()` writes only dirty registers with supported shadow writes.
-7. `shadow.flush_always()` writes supported shadow-write registers regardless of dirty state.
-8. Flush operations mark flushed registers clean.
-9. `singlepulse` fields are auto-cleared in shadow after flush.
-10. `onread=rclr/rset` behavior is modeled in shadow update logic.
+4. `field.rd_shadow.read()` reads register read-shadow.
+5. `field.wr_shadow.read()` reads register write-shadow.
+6. Dirty flag is tracked per register.
+7. `wr_shadow.flush()` writes only dirty registers with supported shadow writes.
+8. `wr_shadow.flush_always()` writes supported shadow-write registers regardless of dirty state.
+9. Flush operations mark flushed registers clean.
+10. `singlepulse` fields are auto-cleared in shadow after flush.
+11. `onread=rclr/rset` behavior is modeled in shadow update logic.
 
 ### 1.4 Types, widths, and addressing
 
@@ -69,10 +72,12 @@ design work.
 
 1. Hard generation errors are used for reserved API symbol conflicts.
 2. Reserved names include API helpers such as:
-   - `shadow`
-   - `ShadowOps`
-   - `shadow_read_hw_impl`
-   - `shadow_flush_impl`
+   - `rd_shadow`
+   - `wr_shadow`
+   - `RdShadowOps`
+   - `WrShadowOps`
+   - `rd_shadow_read_hw_impl`
+   - `wr_shadow_flush_impl`
    - top/register helper symbols (`ok`, `last_error`, `read`, etc.)
 
 ### 1.7 Packaging and developer flow
@@ -107,9 +112,8 @@ design work.
 
 ### 3.2 Shadow model clarity
 
-1. `field.shadow.read()` contract is finalized as read-shadow (implemented).
+1. `rd_shadow` and `wr_shadow` split is implemented.
 2. Define first-read shadow validity policy explicitly in docs/API contract.
-3. Decide whether to expose both read-shadow and write-shadow views.
 
 ### 3.3 Array bounds policy
 
