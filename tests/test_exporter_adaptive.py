@@ -188,17 +188,10 @@ def _build_case_constants(
             excluded={0},
             fallback=min(field_max, 1),
         )
-        write_shadow = _choose_distinct_value(
-            rng,
-            field_max,
-            excluded={write_direct},
-            fallback=min(field_max, 2),
-        )
     else:
         init_raw = data_mask & 0xA5A5A5A5A5A5A5A5
         hw_read_raw = data_mask & 0x5A5A5A5A5A5A5A5A
         write_direct = min(field_max, 1)
-        write_shadow = min(field_max, 2 if field_max >= 2 else 1)
 
     expected_after_direct = (init_raw & ~mask) | ((write_direct << target.field_low) & mask)
 
@@ -206,7 +199,6 @@ def _build_case_constants(
         "init_raw": init_raw,
         "hw_read_raw": hw_read_raw,
         "write_direct": write_direct,
-        "write_shadow": write_shadow,
         "expected_after_direct": expected_after_direct & data_mask,
         "field_mask": mask & data_mask,
     }
@@ -247,11 +239,11 @@ def _render_cpp_test(target: FieldTarget, constants: dict[str, int], seed: int, 
         constexpr demo::addr_t kRegAddr = static_cast<demo::addr_t>({target.reg_addr}u);
         constexpr demo::data_t kFieldMask = static_cast<demo::data_t>(0x{constants["field_mask"]:X}u);
         constexpr unsigned kFieldShift = {target.field_low}u;
+        constexpr demo::data_t kFieldValueMask = static_cast<demo::data_t>(kFieldMask >> kFieldShift);
 
         constexpr demo::data_t kInitRaw = static_cast<demo::data_t>(0x{constants["init_raw"]:X}u);
         constexpr demo::data_t kHwReadRaw = static_cast<demo::data_t>(0x{constants["hw_read_raw"]:X}u);
         constexpr demo::data_t kDirectWriteValue = static_cast<demo::data_t>(0x{constants["write_direct"]:X}u);
-        constexpr demo::data_t kShadowWriteValue = static_cast<demo::data_t>(0x{constants["write_shadow"]:X}u);
         constexpr demo::data_t kExpectedAfterDirect = static_cast<demo::data_t>(0x{constants["expected_after_direct"]:X}u);
 
         // Keep seed and mode visible for easier reproduction in local debugging.
@@ -271,13 +263,24 @@ def _render_cpp_test(target: FieldTarget, constants: dict[str, int], seed: int, 
         assert(read_value == expected_read);
         assert({target.field_path_cpp}.shadow.read() == expected_read);
 
-        {target.field_path_cpp}.shadow.write(kShadowWriteValue);
+        demo::data_t shadow_before = {target.field_path_cpp}.shadow.read();
+        demo::data_t shadow_write_value = static_cast<demo::data_t>(
+            (shadow_before ^ static_cast<demo::data_t>(1u)) & kFieldValueMask
+        );
+        if (shadow_write_value == shadow_before) {{
+            shadow_write_value = static_cast<demo::data_t>(
+                (shadow_before + static_cast<demo::data_t>(1u)) & kFieldValueMask
+            );
+        }}
+        assert(shadow_write_value != shadow_before);
+
+        {target.field_path_cpp}.shadow.write(shadow_write_value);
         assert({target.reg_path_cpp}.shadow.dirty());
 
         std::uint64_t writes_before = bus.write_count[kRegAddr];
         {target.reg_path_cpp}.shadow.flush();
         assert(bus.write_count[kRegAddr] == writes_before + 1);
-        assert((bus.mem[kRegAddr] & kFieldMask) == ((kShadowWriteValue << kFieldShift) & kFieldMask));
+        assert((bus.mem[kRegAddr] & kFieldMask) == ((shadow_write_value << kFieldShift) & kFieldMask));
 
         assert(my_root.ok());
         return 0;

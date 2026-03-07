@@ -1,0 +1,6 @@
+addrmap rm_1 {
+    reg {
+        field { sw=r; hw=r; } f_1[0:0] = 1'b0;
+        field { sw=rw; hw=r; } f_2[1:1] = 1'b0;
+    } r_1 @0x0;
+};
