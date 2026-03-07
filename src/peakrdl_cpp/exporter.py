@@ -109,7 +109,13 @@ CPP_KEYWORDS = {
 }
 
 
-_CONTAINER_RESERVED = {"shadow", "ShadowOps", "shadow_read_hw_impl", "shadow_flush_impl"}
+_CONTAINER_RESERVED = {
+    "shadow",
+    "ShadowOps",
+    "shadow_read_hw_impl",
+    "shadow_flush_impl",
+    "shadow_flush_always_impl",
+}
 _TOP_RESERVED = {
     "shadow",
     "ShadowOps",
@@ -120,6 +126,7 @@ _TOP_RESERVED = {
     "kThrowOnError",
     "shadow_read_hw_impl",
     "shadow_flush_impl",
+    "shadow_flush_always_impl",
 }
 _REG_RESERVED = {
     "shadow",
@@ -629,6 +636,7 @@ class _Renderer:
         lines.append("")
         lines.append("#pragma once")
         lines.append("")
+        lines.append("#include <cassert>")
         lines.append("#include <array>")
         lines.append("#include <cstddef>")
         lines.append("#include <cstdint>")
@@ -647,6 +655,10 @@ class _Renderer:
         lines.append(
             f"static constexpr bool kCheckWriteRange = {'true' if self.design.check_write_range else 'false'};"
         )
+        lines.append("")
+        lines.append("// Bus adapter contract (documented-only):")
+        lines.append("//   data_t read(addr_t addr);")
+        lines.append("//   void write(addr_t addr, data_t value);")
         lines.append("")
 
         self._emit_detail_runtime(lines)
@@ -669,7 +681,6 @@ class _Renderer:
         lines.append("namespace detail {")
         lines.append("")
         lines.append("enum class AccessMode : std::uint8_t { na, r, w, rw, rw1, w1 };")
-        lines.append("enum class OnReadMode : std::uint8_t { none, rclr, rset, ruser };")
         lines.append("using signed_data_t = std::make_signed_t<data_t>;")
         lines.append("using signed_input_t = std::intmax_t;")
         lines.append("using unsigned_input_t = std::uintmax_t;")
@@ -714,10 +725,21 @@ class _Renderer:
         lines.append("template <typename ElemT, std::size_t N>")
         lines.append("class NodeArray {")
         lines.append("public:")
-        lines.append("    ElemT& operator[](std::size_t idx) { return *items_[idx]; }")
-        lines.append("    const ElemT& operator[](std::size_t idx) const { return *items_[idx]; }")
+        lines.append("    ElemT& operator[](std::size_t idx) {")
+        lines.append("        assert(idx < N);")
+        lines.append("        assert(items_[idx] != nullptr);")
+        lines.append("        return *items_[idx];")
+        lines.append("    }")
+        lines.append("    const ElemT& operator[](std::size_t idx) const {")
+        lines.append("        assert(idx < N);")
+        lines.append("        assert(items_[idx] != nullptr);")
+        lines.append("        return *items_[idx];")
+        lines.append("    }")
         lines.append("    constexpr std::size_t size() const { return N; }")
-        lines.append("    void set(std::size_t idx, std::unique_ptr<ElemT> elem) { items_[idx] = std::move(elem); }")
+        lines.append("    void set(std::size_t idx, std::unique_ptr<ElemT> elem) {")
+        lines.append("        assert(idx < N);")
+        lines.append("        items_[idx] = std::move(elem);")
+        lines.append("    }")
         lines.append("private:")
         lines.append("    std::array<std::unique_ptr<ElemT>, N> items_{};")
         lines.append("};")
@@ -734,8 +756,7 @@ class _Renderer:
         lines.append("        data_t rclr_mask,")
         lines.append("        data_t rset_mask,")
         lines.append("        data_t singlepulse_mask,")
-        lines.append("        bool shadow_write_supported,")
-        lines.append("        const char* reg_name)")
+        lines.append("        bool shadow_write_supported)")
         lines.append("        : ctx_(ctx),")
         lines.append("          offset_(reg_offset),")
         lines.append("          read_shadow_(reset_value),")
@@ -746,8 +767,7 @@ class _Renderer:
         lines.append("          rset_mask_(rset_mask),")
         lines.append("          singlepulse_mask_(singlepulse_mask),")
         lines.append("          shadow_write_supported_(shadow_write_supported),")
-        lines.append("          dirty_(false),")
-        lines.append("          name_(reg_name) {}")
+        lines.append("          dirty_(false) {}")
         lines.append("")
         lines.append("    addr_t address() const { return static_cast<addr_t>(ctx_.base_address + offset_); }")
         lines.append("    bool dirty() const { return dirty_; }")
@@ -764,26 +784,20 @@ class _Renderer:
         lines.append("    }")
         lines.append("")
         lines.append("    void flush() {")
-        lines.append("        if (!shadow_write_supported_) {")
-        lines.append("            ctx_.fail(\"shadow.flush() is unsupported for this register\");")
-        lines.append("            return;")
-        lines.append("        }")
-        lines.append("        if (!dirty_) {")
-        lines.append("            return;")
-        lines.append("        }")
-        lines.append("        ctx_.bus->write(address(), to_bus_data(write_shadow_));")
-        lines.append("        dirty_ = false;")
-        lines.append("        apply_singlepulse_clear();")
+        lines.append("        flush_impl(true);")
         lines.append("    }")
         lines.append("")
-        lines.append("    data_t read_field_hw(data_t mask, std::uint8_t lsb, const char* field_name) {")
-        lines.append("        (void)field_name;")
+        lines.append("    void flush_always() {")
+        lines.append("        flush_impl(false);")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    data_t read_field_hw(data_t mask, std::uint8_t lsb) {")
         lines.append("        data_t raw = read_hw();")
         lines.append("        return static_cast<data_t>((raw & mask) >> lsb);")
         lines.append("    }")
         lines.append("")
         lines.append("    data_t read_field_shadow(data_t mask, std::uint8_t lsb) const {")
-        lines.append("        return static_cast<data_t>((write_shadow_ & mask) >> lsb);")
+        lines.append("        return static_cast<data_t>((read_shadow_ & mask) >> lsb);")
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_write_unsigned(")
@@ -812,9 +826,6 @@ class _Renderer:
         lines.append("            write_shadow_ = next;")
         lines.append("            dirty_ = true;")
         lines.append("        }")
-        lines.append(
-            "        read_shadow_ = static_cast<data_t>((read_shadow_ & static_cast<data_t>(~mask)) | encoded);"
-        )
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_write_signed(")
@@ -857,7 +868,10 @@ class _Renderer:
         lines.append("        if (sw_mode == AccessMode::w || sw_mode == AccessMode::w1) {")
         lines.append("            base_value = write_shadow_;")
         lines.append("        } else {")
-        lines.append("            base_value = read_hw();")
+        lines.append("            const data_t hw_value = read_hw();")
+        lines.append(
+            "            base_value = static_cast<data_t>((hw_value & static_cast<data_t>(~write_only_mask_)) | (write_shadow_ & write_only_mask_));"
+        )
         lines.append("        }")
         lines.append("")
         lines.append("        const data_t narrowed = static_cast<data_t>(value);")
@@ -898,6 +912,18 @@ class _Renderer:
         lines.append("    }")
         lines.append("")
         lines.append("private:")
+        lines.append("    void flush_impl(bool only_if_dirty) {")
+        lines.append("        if (!shadow_write_supported_) {")
+        lines.append("            ctx_.fail(\"shadow.flush() is unsupported for this register\");")
+        lines.append("            return;")
+        lines.append("        }")
+        lines.append("        if (only_if_dirty && !dirty_) {")
+        lines.append("            return;")
+        lines.append("        }")
+        lines.append("        ctx_.bus->write(address(), to_bus_data(write_shadow_));")
+        lines.append("        dirty_ = false;")
+        lines.append("        apply_singlepulse_clear();")
+        lines.append("    }")
         lines.append("    void apply_hw_read(data_t raw) {")
         lines.append("        const data_t readable = read_mask_;")
         lines.append(
@@ -959,7 +985,6 @@ class _Renderer:
         lines.append("    data_t singlepulse_mask_;")
         lines.append("    bool shadow_write_supported_;")
         lines.append("    bool dirty_;")
-        lines.append("    const char* name_;")
         lines.append("};")
         lines.append("")
         lines.append("} // namespace detail")
@@ -1032,8 +1057,7 @@ class _Renderer:
             + _data_lit(reg.rset_mask)
             + ", "
             + _data_lit(reg.singlepulse_mask)
-            + ", kShadowWriteSupported, "
-            + _c_string(reg.path)
+            + ", kShadowWriteSupported"
             + ")"
         )
         init_parts = [state_ctor, "shadow(this)"]
@@ -1055,6 +1079,7 @@ class _Renderer:
         lines.append(f"        explicit ShadowOps({reg.class_name}* owner) : owner_(owner) {{}}")
         lines.append("        void read_hw() { owner_->state_.shadow_read_hw(); }")
         lines.append("        void flush() { owner_->state_.flush(); }")
+        lines.append("        void flush_always() { owner_->state_.flush_always(); }")
         lines.append("        bool dirty() const { return owner_->state_.dirty(); }")
         lines.append("    private:")
         lines.append(f"        {reg.class_name}* owner_;")
@@ -1091,9 +1116,6 @@ class _Renderer:
             f"        static constexpr detail::AccessMode SW = detail::AccessMode::{_sw_cpp(field.sw)};"
         )
         lines.append(
-            f"        static constexpr detail::OnReadMode ONREAD = detail::OnReadMode::{_onread_cpp(field.onread)};"
-        )
-        lines.append(
             f"        static constexpr bool SINGLEPULSE = {'true' if field.singlepulse else 'false'};"
         )
         lines.append("")
@@ -1102,9 +1124,7 @@ class _Renderer:
 
         if field.readable:
             lines.append("        data_t read() {")
-            lines.append(
-                f"            return owner_->state_.read_field_hw(MASK, LSB, {_c_string(field.path)});"
-            )
+            lines.append("            return owner_->state_.read_field_hw(MASK, LSB);")
             lines.append("        }")
             lines.append("")
 
@@ -1207,7 +1227,11 @@ class _Renderer:
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_flush_impl() {")
-        self._emit_shadow_flush_body(lines, container, top=False)
+        self._emit_shadow_flush_body(lines, container, top=False, always=False)
+        lines.append("    }")
+        lines.append("")
+        lines.append("    void shadow_flush_always_impl() {")
+        self._emit_shadow_flush_body(lines, container, top=False, always=True)
         lines.append("    }")
         lines.append("};")
         lines.append("")
@@ -1260,7 +1284,11 @@ class _Renderer:
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_flush_impl() {")
-        self._emit_shadow_flush_body(lines, top, top=True)
+        self._emit_shadow_flush_body(lines, top, top=True, always=False)
+        lines.append("    }")
+        lines.append("")
+        lines.append("    void shadow_flush_always_impl() {")
+        self._emit_shadow_flush_body(lines, top, top=True, always=True)
         lines.append("    }")
         lines.append("};")
         lines.append("")
@@ -1309,6 +1337,7 @@ class _Renderer:
         lines.append(f"        explicit ShadowOps({owner_type}* owner) : owner_(owner) {{}}")
         lines.append("        void read_hw() { owner_->shadow_read_hw_impl(); }")
         lines.append("        void flush() { owner_->shadow_flush_impl(); }")
+        lines.append("        void flush_always() { owner_->shadow_flush_always_impl(); }")
         lines.append("    private:")
         lines.append(f"        {owner_type}* owner_;")
         lines.append("    };")
@@ -1338,26 +1367,35 @@ class _Renderer:
                     lines.append("            elem.shadow.read_hw();")
                     lines.append("        }")
 
-    def _emit_shadow_flush_body(self, lines: List[str], container: ContainerModel, top: bool) -> None:
+    def _emit_shadow_flush_body(
+        self,
+        lines: List[str],
+        container: ContainerModel,
+        top: bool,
+        always: bool,
+    ) -> None:
+        flush_call = "flush_always" if always else "flush"
         for child in container.children:
             if isinstance(child, ChildSingle):
                 target = child.target
                 if isinstance(target, RegisterModel):
                     lines.append(
-                        f"        if ({child.cpp_name}.supports_shadow_write()) {child.cpp_name}.shadow.flush();"
+                        f"        if ({child.cpp_name}.supports_shadow_write()) {child.cpp_name}.shadow.{flush_call}();"
                     )
                 else:
-                    lines.append(f"        {child.cpp_name}.shadow.flush();")
+                    lines.append(f"        {child.cpp_name}.shadow.{flush_call}();")
             else:
                 if isinstance(child.element, RegisterModel):
                     lines.append(f"        for (std::size_t i = 0; i < {child.cpp_name}.size(); ++i) {{")
                     lines.append(f"            auto& elem = {child.cpp_name}[i];")
-                    lines.append("            if (elem.supports_shadow_write()) elem.shadow.flush();")
+                    lines.append(
+                        f"            if (elem.supports_shadow_write()) elem.shadow.{flush_call}();"
+                    )
                     lines.append("        }")
                 else:
                     lines.append(f"        for (std::size_t i = 0; i < {child.cpp_name}.size(); ++i) {{")
                     lines.append(f"            auto& elem = {child.cpp_name}[i];")
-                    lines.append("            elem.shadow.flush();")
+                    lines.append(f"            elem.shadow.{flush_call}();")
                     lines.append("        }")
 
 
@@ -1450,17 +1488,6 @@ def _sw_cpp(sw: AccessType) -> str:
         AccessType.w1: "w1",
     }
     return mapping[sw]
-
-
-def _onread_cpp(onread: Optional[OnReadType]) -> str:
-    if onread is None:
-        return "none"
-    mapping = {
-        OnReadType.rclr: "rclr",
-        OnReadType.rset: "rset",
-        OnReadType.ruser: "ruser",
-    }
-    return mapping[onread]
 
 
 def _c_string(text: str) -> str:

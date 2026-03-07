@@ -51,17 +51,19 @@ Generated API shape:
   - `sw=r`: no `write()`
   - `sw=w`: no `read()`
 - Shadow API:
-  - `field.shadow.read()`, `field.shadow.write(...)`
-  - `reg.shadow.read_hw()`, `reg.shadow.flush()`
-  - `regfile.shadow.read_hw()`, `regfile.shadow.flush()`
-  - `addrmap.shadow.read_hw()`, `addrmap.shadow.flush()`
+  - `field.shadow.read()` (reads register read-shadow), `field.shadow.write(...)` (updates register write-shadow)
+  - `reg.shadow.read_hw()`, `reg.shadow.flush()`, `reg.shadow.flush_always()`
+  - `regfile.shadow.read_hw()`, `regfile.shadow.flush()`, `regfile.shadow.flush_always()`
+  - `addrmap.shadow.read_hw()`, `addrmap.shadow.flush()`, `addrmap.shadow.flush_always()`
 - Hard generation error on reserved symbol conflicts (for example `shadow`).
 - Error handling style:
   - `--error-style exceptions` throws `std::runtime_error`
   - `--error-style status` records errors and exposes `ok()/last_error()/clear_error()`
+  - In `exceptions` mode these status methods still exist, but are mainly useful in `status` mode.
 - Write range validation:
   - enabled by default
   - disable with `--no-write-range-check` to skip generated runtime range checks on `write()` and `shadow.write()`
+  - `write()`/`shadow.write()` accept both signed and unsigned integral input types regardless of field signedness.
 - Access width:
   - `data_t` is deduced from SystemRDL `accesswidth`.
   - If more than one numeric `accesswidth` is present in the design, generation fails.
@@ -71,6 +73,7 @@ Bus adapter requirements:
 
 - `data_t read(addr_t addr);`
 - `void write(addr_t addr, data_t value);`
+- This contract is currently documented but not yet enforced via C++ concepts/static constraints.
 
 ## Example
 

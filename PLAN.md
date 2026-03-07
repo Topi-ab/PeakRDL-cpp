@@ -28,13 +28,17 @@ design work.
 ### 1.3 Shadow and read/write behavior
 
 1. `field.write(value)` is direct hardware write logic using register context.
-2. `field.shadow.write(value)` updates shadow state only.
-3. `field.read()` performs a hardware read and updates register shadow state.
-4. `field.shadow.read()` reads shadow state.
+   - For mixed RW+WO registers, direct write composition preserves WO bits from
+     shadow while merging readable bits from hardware read.
+2. `field.shadow.write(value)` updates register write-shadow only.
+3. `field.read()` performs a hardware read and updates register read-shadow and write-shadow for readable bits.
+4. `field.shadow.read()` reads register read-shadow.
 5. Dirty flag is tracked per register.
 6. `shadow.flush()` writes only dirty registers with supported shadow writes.
-7. `singlepulse` fields are auto-cleared in shadow after flush.
-8. `onread=rclr/rset` behavior is modeled in shadow update logic.
+7. `shadow.flush_always()` writes supported shadow-write registers regardless of dirty state.
+8. Flush operations mark flushed registers clean.
+9. `singlepulse` fields are auto-cleared in shadow after flush.
+10. `onread=rclr/rset` behavior is modeled in shadow update logic.
 
 ### 1.4 Types, widths, and addressing
 
@@ -44,6 +48,8 @@ design work.
 4. `regwidth <= accesswidth` is enforced.
 5. Generation-time Python checks enforce that computed offsets fit `addr_t`.
    - Overflow/truncation is rejected during generation.
+6. Register access span overflow is checked at generation time.
+   - `start + (accesswidth/8) - 1` must fit `addr_t`.
 
 ### 1.5 Error handling and validation
 
@@ -79,6 +85,8 @@ design work.
    - generation failures and diagnostics
    - compile/link/run behavior for generated C++
    - example in-place generation
+6. Fixture-driven tests auto-discover `tests/fixtures/rdl/**/*.rdl`.
+7. Test extra includes parallel test support (`pytest-xdist`).
 
 ## 2. Current Constraints
 
@@ -99,7 +107,7 @@ design work.
 
 ### 3.2 Shadow model clarity
 
-1. Finalize whether `field.shadow.read()` should return read-shadow or write-shadow.
+1. `field.shadow.read()` contract is finalized as read-shadow (implemented).
 2. Define first-read shadow validity policy explicitly in docs/API contract.
 3. Decide whether to expose both read-shadow and write-shadow views.
 
@@ -129,6 +137,5 @@ design work.
 ## 4. Next Priorities
 
 1. Finalize `onwrite` support policy and implementation scope.
-2. Freeze shadow-read semantics (`read-shadow` vs `write-shadow` contract).
-3. Decide array bounds behavior.
-4. Improve conflict diagnostics aggregation.
+2. Decide array bounds behavior.
+3. Improve conflict diagnostics aggregation.

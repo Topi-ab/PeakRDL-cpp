@@ -182,6 +182,11 @@ def test_end_to_end_generate_compile_and_run() -> None:
         assert(bus.write_count[kExampleRegAddr] == writes_before_flush + 1);
         assert(bus.mem[kExampleRegAddr] == 0x3F9ull);
 
+        std::uint64_t writes_before_flush_always = bus.write_count[kExampleRegAddr];
+        my_root.regfile_1[3].sub_regfile.example_reg.shadow.flush_always();
+        assert(bus.write_count[kExampleRegAddr] == writes_before_flush_always + 1);
+        assert(!my_root.regfile_1[3].sub_regfile.example_reg.shadow.dirty());
+
         my_root.regfile_1[3].sub_regfile.example_reg.pulse.shadow.write(std::uint64_t{{1}});
         my_root.regfile_1[3].sub_regfile.example_reg.shadow.flush();
         assert(my_root.regfile_1[3].sub_regfile.example_reg.pulse.shadow.read() == 0u);
@@ -189,7 +194,7 @@ def test_end_to_end_generate_compile_and_run() -> None:
         bus.mem[kStatusRegAddr] = 0x3ull;
         std::uint64_t rc = my_root.regfile_1[3].sub_regfile.status_reg.rc.read();
         assert(rc == 1u);
-        assert(my_root.regfile_1[3].sub_regfile.status_reg.rc.shadow.read() == 0u);
+        assert(my_root.regfile_1[3].sub_regfile.status_reg.rc.shadow.read() == 1u);
         assert(my_root.regfile_1[3].sub_regfile.status_reg.rs.shadow.read() == 1u);
 
         std::uint64_t unsupported_reads_before = bus.read_count[kUnsupportedRegAddr];
@@ -199,7 +204,88 @@ def test_end_to_end_generate_compile_and_run() -> None:
         std::uint64_t unsupported_writes_before = bus.write_count[kUnsupportedRegAddr];
         my_root.shadow.flush();
         assert(bus.write_count[kUnsupportedRegAddr] == unsupported_writes_before);
+        my_root.shadow.flush_always();
+        assert(bus.write_count[kUnsupportedRegAddr] == unsupported_writes_before);
 
+        assert(my_root.ok());
+        return 0;
+    }}
+    """
+
+    cpp_file.write_text(cpp_test, encoding="utf-8")
+    _build_and_run_cpp(cpp_file, exe_file)
+
+
+def test_direct_write_preserves_write_only_bits_when_hw_read_masks_them() -> None:
+    case_dir = _reset_case_dir("wo_merge_preserve")
+
+    rdl_text = """
+    addrmap top {
+      reg {
+        field { sw=rw; } rwf[3:0] = 4'h0;
+        field { sw=w; } wof[11:8] = 4'h0;
+      } mix @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    hpp_file = case_dir / "regs.hpp"
+    cpp_file = case_dir / "test.cpp"
+    exe_file = case_dir / "test_bin"
+
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+    CppExporter().export(
+        top,
+        hpp_file,
+        namespace="demo",
+        class_name="TopRoot",
+        error_style="exceptions",
+    )
+
+    cpp_test = f"""
+    #include <cassert>
+    #include <cstdint>
+    #include <unordered_map>
+
+    #include \"{hpp_file}\"
+
+    struct MockBus {{
+        static constexpr std::uint64_t kWofMask = 0xF00ull;
+        std::unordered_map<std::uint64_t, std::uint64_t> mem;
+        std::unordered_map<std::uint64_t, std::uint64_t> read_count;
+        std::unordered_map<std::uint64_t, std::uint64_t> write_count;
+
+        std::uint64_t read(std::uint64_t addr) {{
+            read_count[addr]++;
+            // Emulate write-only bits as unreadable from HW.
+            return mem[addr] & ~kWofMask;
+        }}
+
+        void write(std::uint64_t addr, std::uint64_t value) {{
+            write_count[addr]++;
+            mem[addr] = value;
+        }}
+    }};
+
+    int main() {{
+        using Root = demo::TopRoot<MockBus>;
+        MockBus bus;
+        Root my_root(bus, 0);
+
+        constexpr std::uint64_t kRegAddr = 0x0ull;
+        bus.mem[kRegAddr] = 0x0ull;
+
+        my_root.mix.wof.write(std::uint64_t{{0xA}});
+        assert(bus.mem[kRegAddr] == 0xA00ull);
+
+        std::uint64_t reads_before = bus.read_count[kRegAddr];
+        my_root.mix.rwf.write(std::uint64_t{{0x3}});
+        assert(bus.read_count[kRegAddr] == reads_before + 1);
+
+        // WO bits must be preserved from shadow, not lost due to masked HW read().
+        assert(bus.mem[kRegAddr] == 0xA03ull);
         assert(my_root.ok());
         return 0;
     }}
@@ -258,6 +344,79 @@ def test_status_error_mode_no_throw() -> None:
         root.clear_error();
         assert(root.ok());
 
+        return 0;
+    }}
+    """
+
+    cpp_file.write_text(cpp_test, encoding="utf-8")
+    _build_and_run_cpp(cpp_file, exe_file)
+
+
+def test_shadow_read_uses_read_shadow_not_write_shadow() -> None:
+    case_dir = _reset_case_dir("shadow_read_from_read_shadow")
+
+    rdl_text = """
+    addrmap top {
+      reg {
+        field { sw=rw; } f[3:0] = 4'h0;
+      } r0 @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    hpp_file = case_dir / "regs.hpp"
+    cpp_file = case_dir / "test.cpp"
+    exe_file = case_dir / "test_bin"
+
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+    CppExporter().export(
+        top,
+        hpp_file,
+        namespace="demo",
+        class_name="TopRoot",
+        error_style="exceptions",
+    )
+
+    cpp_test = f"""
+    #include <cassert>
+    #include <cstdint>
+    #include <unordered_map>
+
+    #include \"{hpp_file}\"
+
+    struct MockBus {{
+        std::unordered_map<std::uint64_t, std::uint64_t> mem;
+        std::uint64_t read(std::uint64_t addr) {{ return mem[addr]; }}
+        void write(std::uint64_t addr, std::uint64_t value) {{ mem[addr] = value; }}
+    }};
+
+    int main() {{
+        MockBus bus;
+        demo::TopRoot<MockBus> root(bus, 0);
+
+        constexpr std::uint64_t kAddr = 0x0ull;
+        bus.mem[kAddr] = 0x0ull;
+
+        root.r0.f.shadow.write(std::uint64_t{{5}});
+        assert(root.r0.shadow.dirty());
+        assert(root.r0.f.shadow.read() == 0u);
+
+        bus.mem[kAddr] = 0x9ull;
+        assert(root.r0.f.read() == 0x9ull);
+        assert(root.r0.f.shadow.read() == 0x9ull);
+
+        root.r0.f.shadow.write(std::uint64_t{{3}});
+        assert(root.r0.f.shadow.read() == 0x9ull);
+
+        root.r0.shadow.flush();
+        assert(bus.mem[kAddr] == 0x3ull);
+        assert(root.r0.f.shadow.read() == 0x9ull);
+
+        root.r0.shadow.read_hw();
+        assert(root.r0.f.shadow.read() == 0x3ull);
+        assert(root.ok());
         return 0;
     }}
     """
@@ -463,6 +622,27 @@ def test_generation_fails_on_shadow_impl_name_conflict() -> None:
       reg {
         field { sw=rw; } f[0:0] = 1'b0;
       } shadow_flush_impl @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    out_file = case_dir / "regs.hpp"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+
+    with pytest.raises(ValueError, match="reserved generated API symbol"):
+        CppExporter().export(top, out_file, namespace="demo", class_name="Top")
+
+
+def test_generation_fails_on_shadow_flush_always_impl_name_conflict() -> None:
+    case_dir = _reset_case_dir("shadow_flush_always_impl_name_conflict")
+
+    rdl_text = """
+    addrmap top {
+      reg {
+        field { sw=rw; } f[0:0] = 1'b0;
+      } shadow_flush_always_impl @0x0;
     };
     """
 
