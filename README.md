@@ -127,4 +127,4 @@ Generated output exception:
 - The exception is provided as an additional permission under GNU GPLv3
   section 7 (as incorporated by LGPLv3).
 
-See [LICENSE.generated-output-exception](LICENSE.generated-output-exception).
+See [PERMISSION.generated-output-exception](PERMISSION.generated-output-exception).
