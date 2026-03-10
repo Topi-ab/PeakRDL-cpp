@@ -11,6 +11,12 @@ python3 -m venv .venv
 pip install -e .
 ```
 
+Install from PyPI (after first release):
+
+```bash
+pip install peakrdl-cpp
+```
+
 ## Usage
 
 Generate a C++ header from an RDL file:
@@ -113,6 +119,43 @@ The test suite includes end-to-end validation:
 - generate C++
 - compile and link C++ test bench against generated headers
 - execute runtime behavior checks
+
+## Publish To PyPI (Maintainers)
+
+This project includes GitHub Actions trusted publishing via
+`.github/workflows/publish-pypi.yml` (no API token required).
+
+One-time setup on PyPI:
+
+1. Create `peakrdl-cpp` on PyPI as a new project.
+2. In project settings, configure a Trusted Publisher:
+   - Owner: `Topi-ab`
+   - Repository: `PeakRDL-cpp`
+   - Workflow: `publish-pypi.yml`
+   - Environment: leave empty (unless you add one in GitHub Actions)
+
+Local preflight build/check:
+
+```bash
+. .venv/bin/activate
+pip install -e ".[dev]"
+repo_dir="$(pwd)"
+cd ..
+python -m build --sdist --wheel --outdir "$repo_dir/dist" "$repo_dir"
+python -m twine check "$repo_dir"/dist/*
+cd "$repo_dir"
+```
+
+Release flow:
+
+1. Bump version in `pyproject.toml`.
+2. Create and push a git tag:
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+3. Create a GitHub release from that tag.
+4. The publish workflow uploads `dist/*` to PyPI automatically.
 
 ## License
 

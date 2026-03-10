@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,8 +7,25 @@ name = "peakrdl-cpp"
 version = "0.1.0"
 description = "PeakRDL exporter that generates C++ register maps"
 readme = "README.md"
-license = {file = "LICENSE"}
+license = "LGPL-3.0-or-later"
+license-files = ["LICENSE", "PERMISSION.generated-output-exception"]
 requires-python = ">=3.9"
+authors = [
+  {name = "PeakRDL-cpp contributors"},
+]
+keywords = ["systemrdl", "peakrdl", "registers", "codegen", "c++"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Software Development :: Embedded Systems",
+]
 dependencies = [
   "peakrdl>=1.5.0",
   "systemrdl-compiler>=1.32.0",
@@ -19,6 +36,16 @@ test = [
   "pytest>=8.0.0",
   "pytest-xdist>=3.0.0",
 ]
+dev = [
+  "build>=1.2.0",
+  "twine>=5.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Topi-ab/PeakRDL-cpp"
+Repository = "https://github.com/Topi-ab/PeakRDL-cpp"
+Issues = "https://github.com/Topi-ab/PeakRDL-cpp/issues"
+Changelog = "https://github.com/Topi-ab/PeakRDL-cpp/releases"
 
 [project.entry-points."peakrdl.exporters"]
 cpp = "peakrdl_cpp.__peakrdl__:Exporter"
