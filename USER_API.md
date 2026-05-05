@@ -35,6 +35,13 @@ Generated per-field APIs (depending on `sw` access):
 - `field.wr_shadow.read()`
 - `field.wr_shadow.write(value)` (if writable)
 
+For fields wider than `data_t`, `value` is a compact little-endian
+`std::array<data_t, N>`:
+
+- element 0 holds the least-significant field bits
+- the final element uses only the remaining valid high bits
+- unused high bits in the final element are rejected when write range checks are enabled
+
 ### 2.1 `field.read()`
 
 - Performs hardware read of the whole register.
@@ -127,6 +134,10 @@ It does not claim equality/inequality versus externally modified hardware.
   - `...rd_shadow.read_hw()`
 
 ## 6. Notes
+
+- `data_t` is the bus access word type and is derived from SystemRDL `accesswidth`.
+- Registers may be wider than `data_t` up to 64 bits. The generated runtime stores register shadows as arrays of `data_t` words.
+- Multiword readable registers require `buffer_reads=true`; multiword writable registers require `buffer_writes=true`. If those UDPs are not visible to the SystemRDL compiler, generation fails closed when they are needed.
 
 - `sw=r` fields do not generate `write()` / `wr_shadow.write()`.
 - `sw=w` fields do not generate `read()`.

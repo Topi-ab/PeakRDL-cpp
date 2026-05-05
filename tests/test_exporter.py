@@ -618,6 +618,277 @@ def test_generation_fails_on_access_span_overflow_for_64bit_access() -> None:
         CppExporter().export(top, out_file, namespace="demo", class_name="Top")
 
 
+def test_generation_fails_on_wide_register_address_span_overflow() -> None:
+    case_dir = _reset_case_dir("wide_address_span_overflow")
+
+    rdl_text = """
+    property buffer_reads { component = reg; type = boolean; };
+
+    addrmap top {
+      reg {
+        regwidth = 64;
+        accesswidth = 32;
+        buffer_reads = true;
+        field { sw=r; } f[63:0] = 64'h0;
+      } r0 @0xFFFFFFFC;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    out_file = case_dir / "regs.hpp"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+
+    with pytest.raises(ValueError, match="Address span overflow"):
+        CppExporter().export(top, out_file, namespace="demo", class_name="Top")
+
+
+def test_generation_fails_on_wide_register_missing_read_buffering() -> None:
+    case_dir = _reset_case_dir("wide_missing_read_buffering")
+
+    rdl_text = """
+    addrmap top {
+      reg {
+        regwidth = 64;
+        accesswidth = 32;
+        field { sw=r; } f[63:0] = 64'h0;
+      } r0 @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    out_file = case_dir / "regs.hpp"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+
+    with pytest.raises(ValueError, match="buffer_reads=true"):
+        CppExporter().export(top, out_file, namespace="demo", class_name="Top")
+
+
+def test_generation_fails_on_crossing_writable_field_missing_write_buffering() -> None:
+    case_dir = _reset_case_dir("wide_cross_missing_write_buffering")
+
+    rdl_text = """
+    property buffer_reads { component = reg; type = boolean; };
+    property buffer_writes { component = reg; type = boolean; };
+
+    addrmap top {
+      reg {
+        regwidth = 64;
+        accesswidth = 32;
+        buffer_reads = true;
+        field { sw=rw; } cross[35:28] = 8'h0;
+      } r0 @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    out_file = case_dir / "regs.hpp"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+
+    with pytest.raises(ValueError, match="Writable crossing fields require buffer_writes=true"):
+        CppExporter().export(top, out_file, namespace="demo", class_name="Top")
+
+
+def test_wide_64_on_32_crossing_scalar_fields_generate_compile_and_run() -> None:
+    case_dir = _reset_case_dir("wide_64_on_32_crossing_scalar")
+
+    rdl_text = """
+    property buffer_reads { component = reg; type = boolean; };
+    property buffer_writes { component = reg; type = boolean; };
+
+    addrmap top {
+      reg {
+        regwidth = 64;
+        accesswidth = 32;
+        buffer_reads = true;
+        buffer_writes = true;
+        field { sw=rw; } low[7:0] = 8'h12;
+        field { sw=rw; } cross[35:28] = 8'h00;
+        field { sw=rw; singlepulse; } pulse[40:40] = 1'b0;
+        field { sw=rw; onread=rclr; } rc[44:44] = 1'b1;
+        field { sw=rw; onread=rset; } rs[45:45] = 1'b0;
+      } r0 @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    hpp_file = case_dir / "regs.hpp"
+    cpp_file = case_dir / "test.cpp"
+    exe_file = case_dir / "test_bin"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+    CppExporter().export(top, hpp_file, namespace="demo", class_name="TopRoot")
+
+    cpp_test = f"""
+    #include <array>
+    #include <cassert>
+    #include <cstdint>
+    #include <unordered_map>
+
+    #include \"{hpp_file}\"
+
+    struct MockBus {{
+        std::unordered_map<demo::addr_t, demo::data_t> mem;
+        std::unordered_map<demo::addr_t, std::uint64_t> read_count;
+        std::unordered_map<demo::addr_t, std::uint64_t> write_count;
+
+        demo::data_t read(demo::addr_t addr) {{
+            read_count[addr]++;
+            return mem[addr];
+        }}
+
+        void write(demo::addr_t addr, demo::data_t value) {{
+            write_count[addr]++;
+            mem[addr] = value;
+        }}
+    }};
+
+    int main() {{
+        MockBus bus;
+        demo::TopRoot<MockBus> root(bus, 0);
+
+        constexpr demo::addr_t kLo = 0x0u;
+        constexpr demo::addr_t kHi = 0x4u;
+
+        bus.mem[kLo] = 0xA00000F0u;
+        bus.mem[kHi] = 0x0000300Bu;
+        assert(root.r0.cross.read() == 0xBAu);
+        assert(bus.read_count[kLo] == 1u);
+        assert(bus.read_count[kHi] == 1u);
+        assert(root.r0.cross.rd_shadow.read() == 0xBAu);
+
+        root.r0.cross.write(0x5Cu);
+        assert(bus.mem[kLo] == 0xC00000F0u);
+        assert(bus.mem[kHi] == 0x00003005u);
+
+        root.r0.pulse.wr_shadow.write(1u);
+        assert(root.r0.pulse.wr_shadow.read() == 1u);
+        root.r0.wr_shadow.flush();
+        assert((bus.mem[kHi] & 0x00000100u) != 0u);
+        assert(root.r0.pulse.wr_shadow.read() == 0u);
+        assert(root.r0.pulse.rd_shadow.read() == 0u);
+
+        bus.mem[kHi] = 0x00003000u;
+        assert(root.r0.rc.read() == 1u);
+        assert(root.r0.rc.wr_shadow.read() == 0u);
+        assert(root.r0.rs.wr_shadow.read() == 1u);
+
+        assert(root.ok());
+        return 0;
+    }}
+    """
+
+    cpp_file.write_text(cpp_test, encoding="utf-8")
+    _build_and_run_cpp(cpp_file, exe_file)
+
+
+def test_wide_field_array_api_generate_compile_and_run() -> None:
+    case_dir = _reset_case_dir("wide_field_array_api")
+
+    rdl_text = """
+    property buffer_reads { component = reg; type = boolean; };
+    property buffer_writes { component = reg; type = boolean; };
+
+    addrmap top {
+      reg {
+        regwidth = 64;
+        accesswidth = 16;
+        buffer_reads = true;
+        buffer_writes = true;
+        field { sw=rw; } big[55:20] = 36'h0;
+      } r0 @0x0;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    hpp_file = case_dir / "regs.hpp"
+    cpp_file = case_dir / "test.cpp"
+    exe_file = case_dir / "test_bin"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+    CppExporter().export(top, hpp_file, namespace="demo", class_name="TopRoot", error_style="status")
+
+    cpp_test = f"""
+    #include <array>
+    #include <cassert>
+    #include <cstdint>
+    #include <unordered_map>
+
+    #include \"{hpp_file}\"
+
+    struct MockBus {{
+        std::unordered_map<demo::addr_t, demo::data_t> mem;
+        std::unordered_map<demo::addr_t, std::uint64_t> read_count;
+        std::unordered_map<demo::addr_t, std::uint64_t> write_count;
+
+        demo::data_t read(demo::addr_t addr) {{
+            read_count[addr]++;
+            return mem[addr];
+        }}
+
+        void write(demo::addr_t addr, demo::data_t value) {{
+            write_count[addr]++;
+            mem[addr] = value;
+        }}
+    }};
+
+    int main() {{
+        MockBus bus;
+        demo::TopRoot<MockBus> root(bus, 0);
+
+        bus.mem[0x0u] = 0x3210u;
+        bus.mem[0x2u] = 0x7654u;
+        bus.mem[0x4u] = 0xBA98u;
+        bus.mem[0x6u] = 0xFEDCu;
+
+        std::array<demo::data_t, 3> read_value = root.r0.big.read();
+        assert(read_value[0] == 0x8765u);
+        assert(read_value[1] == 0xCBA9u);
+        assert(read_value[2] == 0x000Du);
+        assert(bus.read_count[0x0u] == 1u);
+        assert(bus.read_count[0x2u] == 1u);
+        assert(bus.read_count[0x4u] == 1u);
+        assert(bus.read_count[0x6u] == 1u);
+
+        std::array<demo::data_t, 3> write_value{{0xAAAAu, 0x5555u, 0x000Fu}};
+        root.r0.big.write(write_value);
+        assert(bus.mem[0x0u] == 0x3210u);
+        assert(bus.mem[0x2u] == 0xAAA4u);
+        assert(bus.mem[0x4u] == 0x555Au);
+        assert(bus.mem[0x6u] == 0xFEF5u);
+        assert(root.r0.big.wr_shadow.read() == write_value);
+
+        std::array<demo::data_t, 3> too_wide{{0x0000u, 0x0000u, 0x0010u}};
+        root.r0.big.wr_shadow.write(too_wide);
+        assert(!root.ok());
+        root.clear_error();
+
+        std::array<demo::data_t, 3> staged_value{{0x1111u, 0x2222u, 0x0003u}};
+        root.r0.big.wr_shadow.write(staged_value);
+        assert(root.r0.wr_shadow.dirty());
+        root.r0.wr_shadow.flush();
+        assert(!root.r0.wr_shadow.dirty());
+        assert(bus.write_count[0x0u] >= 2u);
+        assert(bus.write_count[0x2u] >= 2u);
+        assert(bus.write_count[0x4u] >= 2u);
+        assert(bus.write_count[0x6u] >= 2u);
+
+        assert(root.ok());
+        return 0;
+    }}
+    """
+
+    cpp_file.write_text(cpp_test, encoding="utf-8")
+    _build_and_run_cpp(cpp_file, exe_file)
+
+
 def test_generation_fails_on_wr_shadow_impl_name_conflict() -> None:
     case_dir = _reset_case_dir("wr_shadow_impl_name_conflict")
 

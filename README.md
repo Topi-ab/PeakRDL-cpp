@@ -74,6 +74,8 @@ Generated API shape:
 - Access width:
   - `data_t` is deduced from SystemRDL `accesswidth`.
   - If more than one numeric `accesswidth` is present in the design, generation fails.
+  - Registers may be wider than `accesswidth` up to 64 bits. Multiword readable registers require `buffer_reads=true`; multiword writable registers require `buffer_writes=true`.
+  - Fields wider than `data_t` use compact `std::array<data_t, N>` values in generated read/write/shadow APIs.
   - `addr_t` is fixed to `std::uint32_t`.
 
 Bus adapter requirements:

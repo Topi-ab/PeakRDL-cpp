@@ -167,6 +167,7 @@ class RegisterModel:
     class_name: str
     path: str
     width: int
+    word_count: int
     reset: int
     read_mask: int
     write_only_mask: int
@@ -298,12 +299,14 @@ class CppExporter:
             if not isinstance(node, RegNode):
                 continue
 
+            reg_width = int(node.get_property("regwidth"))
+            word_count = _ceil_div(reg_width, access_width)
             rel_addr = int(node.absolute_address) - top_base
             _check_addr_range_fits(
                 rel_addr,
                 node.get_path(),
-                span_bytes=access_bytes,
-                span_desc=f"accesswidth={access_width}",
+                span_bytes=word_count * access_bytes,
+                span_desc=f"regwidth={reg_width}, accesswidth={access_width}",
             )
 
 
@@ -463,12 +466,9 @@ class _ModelBuilder:
                 f"Register '{def_reg.get_path()}' has width {reg_width}. "
                 "This exporter currently supports register widths up to 64 bits."
             )
-        if reg_width > self.access_width:
-            raise ValueError(
-                f"Register '{def_reg.get_path()}' has regwidth {reg_width}, "
-                f"which is larger than deduced accesswidth {self.access_width}. "
-                "This exporter currently requires regwidth <= accesswidth."
-            )
+        word_count = _ceil_div(reg_width, self.access_width)
+        buffer_reads = _optional_bool_property(def_reg, "buffer_reads")
+        buffer_writes = _optional_bool_property(def_reg, "buffer_writes")
 
         fields: List[FieldModel] = []
         field_names: List[str] = []
@@ -481,6 +481,8 @@ class _ModelBuilder:
         singlepulse_mask = 0
         shadow_write_supported = True
         unsupported_reasons: List[str] = []
+        has_readable_field = False
+        has_writable_field = False
 
         for item in def_reg.fields(skip_not_present=True):
             if not isinstance(item, FieldNode):
@@ -531,6 +533,20 @@ class _ModelBuilder:
                 # onwrite side effects are not modeled for direct SW writes yet.
                 # Do not emit field write APIs to avoid semantically incorrect behavior.
                 writable = False
+            has_readable_field = has_readable_field or readable
+            has_writable_field = has_writable_field or writable
+
+            if reg_width > self.access_width and _field_crosses_access_word(field, self.access_width):
+                if readable and not buffer_reads:
+                    raise ValueError(
+                        f"Field '{field.get_path()}' crosses accesswidth={self.access_width} word boundaries. "
+                        f"Readable crossing fields require buffer_reads=true on register '{def_reg.get_path()}'."
+                    )
+                if writable and not buffer_writes:
+                    raise ValueError(
+                        f"Field '{field.get_path()}' crosses accesswidth={self.access_width} word boundaries. "
+                        f"Writable crossing fields require buffer_writes=true on register '{def_reg.get_path()}'."
+                    )
 
             if readable:
                 read_mask |= mask
@@ -570,12 +586,24 @@ class _ModelBuilder:
         fields.sort(key=lambda f: f.lsb)
         if reg_width < 64:
             reset &= (1 << reg_width) - 1
+        if reg_width > self.access_width:
+            if has_readable_field and not buffer_reads:
+                raise ValueError(
+                    f"Register '{def_reg.get_path()}' has regwidth {reg_width} greater than accesswidth "
+                    f"{self.access_width}. Readable multiword registers require buffer_reads=true."
+                )
+            if has_writable_field and not buffer_writes:
+                raise ValueError(
+                    f"Register '{def_reg.get_path()}' has regwidth {reg_width} greater than accesswidth "
+                    f"{self.access_width}. Writable multiword registers require buffer_writes=true."
+                )
 
         return RegisterModel(
             cpp_name=_sanitize_identifier(inst_reg.inst_name),
             class_name=class_name,
             path=inst_reg.get_path(),
             width=reg_width,
+            word_count=word_count,
             reset=reset,
             read_mask=read_mask,
             write_only_mask=write_only_mask,
@@ -721,6 +749,10 @@ class _Renderer:
         lines.append("    std::string last_error_msg;")
         lines.append("};")
         lines.append("")
+        lines.append("static constexpr std::size_t kAccessBytes = kAccessWidth / 8;")
+        lines.append("static constexpr std::size_t kMaxRegWords = (64 + kAccessWidth - 1) / kAccessWidth;")
+        lines.append("using reg_storage_t = std::array<data_t, kMaxRegWords>;")
+        lines.append("")
         lines.append("inline data_t bitmask_for_width(std::uint8_t width) {")
         lines.append("    if (width >= kAccessWidth) {")
         lines.append("        return std::numeric_limits<data_t>::max();")
@@ -756,15 +788,19 @@ class _Renderer:
         lines.append("    RegisterState(")
         lines.append("        Context<BusT, ThrowOnError>& ctx,")
         lines.append("        addr_t reg_offset,")
-        lines.append("        data_t reset_value,")
-        lines.append("        data_t read_mask,")
-        lines.append("        data_t write_only_mask,")
-        lines.append("        data_t rclr_mask,")
-        lines.append("        data_t rset_mask,")
-        lines.append("        data_t singlepulse_mask,")
+        lines.append("        std::uint8_t reg_width,")
+        lines.append("        std::uint8_t word_count,")
+        lines.append("        reg_storage_t reset_value,")
+        lines.append("        reg_storage_t read_mask,")
+        lines.append("        reg_storage_t write_only_mask,")
+        lines.append("        reg_storage_t rclr_mask,")
+        lines.append("        reg_storage_t rset_mask,")
+        lines.append("        reg_storage_t singlepulse_mask,")
         lines.append("        bool shadow_write_supported)")
         lines.append("        : ctx_(ctx),")
         lines.append("          offset_(reg_offset),")
+        lines.append("          reg_width_(reg_width),")
+        lines.append("          word_count_(word_count),")
         lines.append("          read_shadow_(reset_value),")
         lines.append("          write_shadow_(reset_value),")
         lines.append("          read_mask_(read_mask),")
@@ -779,10 +815,17 @@ class _Renderer:
         lines.append("    bool dirty() const { return dirty_; }")
         lines.append("    bool supports_shadow_write() const { return shadow_write_supported_; }")
         lines.append("")
-        lines.append("    data_t read_hw() {")
-        lines.append("        data_t raw = ctx_.bus->read(address());")
+        lines.append("    reg_storage_t read_hw() {")
+        lines.append("        reg_storage_t raw{};")
+        lines.append("        for (std::uint8_t idx = 0; idx < word_count_; ++idx) {")
+        lines.append("            raw[idx] = to_bus_data(ctx_.bus->read(word_address(idx)), idx);")
+        lines.append("        }")
         lines.append("        apply_hw_read(raw);")
         lines.append("        return raw;")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    data_t read_hw_scalar() {")
+        lines.append("        return read_hw()[0];")
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_read_hw() {")
@@ -797,21 +840,34 @@ class _Renderer:
         lines.append("        flush_impl(false);")
         lines.append("    }")
         lines.append("")
-        lines.append("    data_t read_field_hw(data_t mask, std::uint8_t lsb) {")
-        lines.append("        data_t raw = read_hw();")
-        lines.append("        return static_cast<data_t>((raw & mask) >> lsb);")
+        lines.append("    data_t read_field_hw_scalar(std::uint8_t lsb, std::uint8_t width) {")
+        lines.append("        return extract_scalar(read_hw(), lsb, width);")
         lines.append("    }")
         lines.append("")
-        lines.append("    data_t read_field_shadow(data_t mask, std::uint8_t lsb) const {")
-        lines.append("        return static_cast<data_t>((read_shadow_ & mask) >> lsb);")
+        lines.append("    data_t read_field_shadow_scalar(std::uint8_t lsb, std::uint8_t width) const {")
+        lines.append("        return extract_scalar(read_shadow_, lsb, width);")
         lines.append("    }")
         lines.append("")
-        lines.append("    data_t read_field_staged(data_t mask, std::uint8_t lsb) const {")
-        lines.append("        return static_cast<data_t>((write_shadow_ & mask) >> lsb);")
+        lines.append("    data_t read_field_staged_scalar(std::uint8_t lsb, std::uint8_t width) const {")
+        lines.append("        return extract_scalar(write_shadow_, lsb, width);")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    std::array<data_t, WordCount> read_field_hw_array(std::uint8_t lsb, std::uint8_t width) {")
+        lines.append("        return extract_array<WordCount>(read_hw(), lsb, width);")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    std::array<data_t, WordCount> read_field_shadow_array(std::uint8_t lsb, std::uint8_t width) const {")
+        lines.append("        return extract_array<WordCount>(read_shadow_, lsb, width);")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    std::array<data_t, WordCount> read_field_staged_array(std::uint8_t lsb, std::uint8_t width) const {")
+        lines.append("        return extract_array<WordCount>(write_shadow_, lsb, width);")
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_write_unsigned(")
-        lines.append("        data_t mask,")
         lines.append("        std::uint8_t lsb,")
         lines.append("        std::uint8_t width,")
         lines.append("        unsigned_input_t value,")
@@ -828,10 +884,32 @@ class _Renderer:
         lines.append("            }")
         lines.append("        }")
         lines.append("        const data_t narrowed = static_cast<data_t>(value);")
-        lines.append("        const data_t encoded = static_cast<data_t>((narrowed << lsb) & mask);")
-        lines.append(
-            "        const data_t next = static_cast<data_t>((write_shadow_ & static_cast<data_t>(~mask)) | encoded);"
-        )
+        lines.append("        reg_storage_t next = write_shadow_;")
+        lines.append("        insert_scalar(next, lsb, width, narrowed);")
+        lines.append("        if (next != write_shadow_) {")
+        lines.append("            write_shadow_ = next;")
+        lines.append("            dirty_ = true;")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    void shadow_write_array(")
+        lines.append("        std::uint8_t lsb,")
+        lines.append("        std::uint8_t width,")
+        lines.append("        const std::array<data_t, WordCount>& value,")
+        lines.append("        const char* field_name) {")
+        lines.append("        if (!shadow_write_supported_) {")
+        lines.append("            ctx_.fail(\"field.wr_shadow.write() is unsupported for this register\");")
+        lines.append("            return;")
+        lines.append("        }")
+        lines.append("        if constexpr (kCheckWriteRange) {")
+        lines.append("            if (!check_array<WordCount>(width, value)) {")
+        lines.append("                ctx_.fail(field_name);")
+        lines.append("                return;")
+        lines.append("            }")
+        lines.append("        }")
+        lines.append("        reg_storage_t next = write_shadow_;")
+        lines.append("        insert_array(next, lsb, width, value);")
         lines.append("        if (next != write_shadow_) {")
         lines.append("            write_shadow_ = next;")
         lines.append("            dirty_ = true;")
@@ -839,7 +917,6 @@ class _Renderer:
         lines.append("    }")
         lines.append("")
         lines.append("    void shadow_write_signed(")
-        lines.append("        data_t mask,")
         lines.append("        std::uint8_t lsb,")
         lines.append("        std::uint8_t width,")
         lines.append("        signed_input_t value,")
@@ -855,11 +932,10 @@ class _Renderer:
         lines.append("            }")
         lines.append("        }")
         lines.append("        const data_t encoded_value = encode_signed(width, value);")
-        lines.append("        shadow_write_unsigned(mask, lsb, width, encoded_value, field_name);")
+        lines.append("        shadow_write_unsigned(lsb, width, encoded_value, field_name);")
         lines.append("    }")
         lines.append("")
         lines.append("    void direct_write_unsigned(")
-        lines.append("        data_t mask,")
         lines.append("        std::uint8_t lsb,")
         lines.append("        std::uint8_t width,")
         lines.append("        unsigned_input_t value,")
@@ -874,37 +950,59 @@ class _Renderer:
         lines.append("            }")
         lines.append("        }")
         lines.append("")
-        lines.append("        data_t base_value = 0;")
+        lines.append("        reg_storage_t base_value{};")
         lines.append("        if (sw_mode == AccessMode::w || sw_mode == AccessMode::w1) {")
         lines.append("            base_value = write_shadow_;")
         lines.append("        } else {")
-        lines.append("            const data_t hw_value = read_hw();")
-        lines.append(
-            "            base_value = static_cast<data_t>((hw_value & static_cast<data_t>(~write_only_mask_)) | (write_shadow_ & write_only_mask_));"
-        )
+        lines.append("            const reg_storage_t hw_value = read_hw();")
+        lines.append("            base_value = merge_read_with_write_only(hw_value);")
         lines.append("        }")
         lines.append("")
         lines.append("        const data_t narrowed = static_cast<data_t>(value);")
-        lines.append("        const data_t encoded = static_cast<data_t>((narrowed << lsb) & mask);")
-        lines.append(
-            "        const data_t next = static_cast<data_t>((base_value & static_cast<data_t>(~mask)) | encoded);"
-        )
-        lines.append("        ctx_.bus->write(address(), to_bus_data(next));")
-        lines.append(
-            "        write_shadow_ = static_cast<data_t>((write_shadow_ & static_cast<data_t>(~mask)) | encoded);"
-        )
-        lines.append(
-            "        read_shadow_ = static_cast<data_t>((read_shadow_ & static_cast<data_t>(~mask)) | encoded);"
-        )
+        lines.append("        insert_scalar(base_value, lsb, width, narrowed);")
+        lines.append("        write_hw(base_value);")
+        lines.append("        insert_scalar(write_shadow_, lsb, width, narrowed);")
+        lines.append("        insert_scalar(read_shadow_, lsb, width, narrowed);")
         lines.append("        dirty_ = false;")
         lines.append("        if (singlepulse) {")
-        lines.append("            write_shadow_ &= static_cast<data_t>(~mask);")
-        lines.append("            read_shadow_ &= static_cast<data_t>(~mask);")
+        lines.append("            clear_range(write_shadow_, lsb, width);")
+        lines.append("            clear_range(read_shadow_, lsb, width);")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    void direct_write_array(")
+        lines.append("        std::uint8_t lsb,")
+        lines.append("        std::uint8_t width,")
+        lines.append("        const std::array<data_t, WordCount>& value,")
+        lines.append("        AccessMode sw_mode,")
+        lines.append("        bool singlepulse,")
+        lines.append("        const char* field_name) {")
+        lines.append("        if constexpr (kCheckWriteRange) {")
+        lines.append("            if (!check_array<WordCount>(width, value)) {")
+        lines.append("                ctx_.fail(field_name);")
+        lines.append("                return;")
+        lines.append("            }")
+        lines.append("        }")
+        lines.append("        reg_storage_t base_value{};")
+        lines.append("        if (sw_mode == AccessMode::w || sw_mode == AccessMode::w1) {")
+        lines.append("            base_value = write_shadow_;")
+        lines.append("        } else {")
+        lines.append("            const reg_storage_t hw_value = read_hw();")
+        lines.append("            base_value = merge_read_with_write_only(hw_value);")
+        lines.append("        }")
+        lines.append("        insert_array(base_value, lsb, width, value);")
+        lines.append("        write_hw(base_value);")
+        lines.append("        insert_array(write_shadow_, lsb, width, value);")
+        lines.append("        insert_array(read_shadow_, lsb, width, value);")
+        lines.append("        dirty_ = false;")
+        lines.append("        if (singlepulse) {")
+        lines.append("            clear_range(write_shadow_, lsb, width);")
+        lines.append("            clear_range(read_shadow_, lsb, width);")
         lines.append("        }")
         lines.append("    }")
         lines.append("")
         lines.append("    void direct_write_signed(")
-        lines.append("        data_t mask,")
         lines.append("        std::uint8_t lsb,")
         lines.append("        std::uint8_t width,")
         lines.append("        signed_input_t value,")
@@ -918,7 +1016,7 @@ class _Renderer:
         lines.append("            }")
         lines.append("        }")
         lines.append("        const data_t encoded = encode_signed(width, value);")
-        lines.append("        direct_write_unsigned(mask, lsb, width, encoded, sw_mode, singlepulse, field_name);")
+        lines.append("        direct_write_unsigned(lsb, width, encoded, sw_mode, singlepulse, field_name);")
         lines.append("    }")
         lines.append("")
         lines.append("private:")
@@ -930,20 +1028,19 @@ class _Renderer:
         lines.append("        if (only_if_dirty && !dirty_) {")
         lines.append("            return;")
         lines.append("        }")
-        lines.append("        ctx_.bus->write(address(), to_bus_data(write_shadow_));")
+        lines.append("        write_hw(write_shadow_);")
         lines.append("        dirty_ = false;")
         lines.append("        apply_singlepulse_clear();")
         lines.append("    }")
-        lines.append("    void apply_hw_read(data_t raw) {")
-        lines.append("        const data_t readable = read_mask_;")
-        lines.append(
-            "        read_shadow_ = static_cast<data_t>((read_shadow_ & static_cast<data_t>(~readable)) | (raw & readable));"
-        )
-        lines.append(
-            "        write_shadow_ = static_cast<data_t>((write_shadow_ & static_cast<data_t>(~readable)) | (raw & readable));"
-        )
-        lines.append("        write_shadow_ &= static_cast<data_t>(~rclr_mask_);")
-        lines.append("        write_shadow_ |= rset_mask_;")
+        lines.append("    void apply_hw_read(const reg_storage_t& raw) {")
+        lines.append("        for (std::uint8_t idx = 0; idx < word_count_; ++idx) {")
+        lines.append("            const data_t readable = read_mask_[idx];")
+        lines.append("            read_shadow_[idx] = static_cast<data_t>((read_shadow_[idx] & static_cast<data_t>(~readable)) | (raw[idx] & readable));")
+        lines.append("            write_shadow_[idx] = static_cast<data_t>((write_shadow_[idx] & static_cast<data_t>(~readable)) | (raw[idx] & readable));")
+        lines.append("            write_shadow_[idx] = static_cast<data_t>((write_shadow_[idx] & static_cast<data_t>(~rclr_mask_[idx])) | rset_mask_[idx]);")
+        lines.append("            read_shadow_[idx] &= word_mask(idx);")
+        lines.append("            write_shadow_[idx] &= word_mask(idx);")
+        lines.append("        }")
         lines.append("    }")
         lines.append("")
         lines.append("    static bool check_signed(std::uint8_t width, signed_input_t value) {")
@@ -972,27 +1069,143 @@ class _Renderer:
         lines.append("        return static_cast<data_t>(static_cast<data_t>(value) & limit);")
         lines.append("    }")
         lines.append("")
-        lines.append("    static data_t to_bus_data(data_t value) {")
-        lines.append("        return static_cast<data_t>(value & bitmask_for_width(kAccessWidth));")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    static bool check_array(std::uint8_t width, const std::array<data_t, WordCount>& value) {")
+        lines.append("        for (std::size_t idx = 0; idx < WordCount; ++idx) {")
+        lines.append("            const std::uint8_t used = word_width_for_field_word(width, idx);")
+        lines.append("            if (used == 0 && value[idx] != data_t{0}) {")
+        lines.append("                return false;")
+        lines.append("            }")
+        lines.append("            if (used > 0 && used < kAccessWidth && (value[idx] & static_cast<data_t>(~bitmask_for_width(used))) != data_t{0}) {")
+        lines.append("                return false;")
+        lines.append("            }")
+        lines.append("        }")
+        lines.append("        return true;")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    static std::uint8_t word_width_for_field_word(std::uint8_t width, std::size_t idx) {")
+        lines.append("        const std::size_t consumed = idx * kAccessWidth;")
+        lines.append("        if (consumed >= width) {")
+        lines.append("            return 0;")
+        lines.append("        }")
+        lines.append("        const std::size_t remaining = width - consumed;")
+        lines.append("        return static_cast<std::uint8_t>(remaining > kAccessWidth ? kAccessWidth : remaining);")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    data_t to_bus_data(data_t value, std::uint8_t word_idx) const {")
+        lines.append("        return static_cast<data_t>(value & word_mask(word_idx));")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    data_t word_mask(std::uint8_t word_idx) const {")
+        lines.append("        const std::uint16_t consumed = static_cast<std::uint16_t>(word_idx) * kAccessWidth;")
+        lines.append("        if (consumed >= reg_width_) {")
+        lines.append("            return data_t{0};")
+        lines.append("        }")
+        lines.append("        const std::uint16_t remaining = static_cast<std::uint16_t>(reg_width_ - consumed);")
+        lines.append("        return bitmask_for_width(static_cast<std::uint8_t>(remaining > kAccessWidth ? kAccessWidth : remaining));")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    addr_t word_address(std::uint8_t word_idx) const {")
+        lines.append("        return static_cast<addr_t>(address() + static_cast<addr_t>(word_idx * kAccessBytes));")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    void write_hw(const reg_storage_t& value) {")
+        lines.append("        for (std::uint8_t idx = 0; idx < word_count_; ++idx) {")
+        lines.append("            ctx_.bus->write(word_address(idx), to_bus_data(value[idx], idx));")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    reg_storage_t merge_read_with_write_only(const reg_storage_t& hw_value) const {")
+        lines.append("        reg_storage_t out{};")
+        lines.append("        for (std::uint8_t idx = 0; idx < word_count_; ++idx) {")
+        lines.append("            out[idx] = static_cast<data_t>((hw_value[idx] & static_cast<data_t>(~write_only_mask_[idx])) | (write_shadow_[idx] & write_only_mask_[idx]));")
+        lines.append("            out[idx] &= word_mask(idx);")
+        lines.append("        }")
+        lines.append("        return out;")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    static data_t extract_scalar(const reg_storage_t& src, std::uint8_t lsb, std::uint8_t width) {")
+        lines.append("        data_t out = 0;")
+        lines.append("        std::uint8_t remaining = width;")
+        lines.append("        std::uint8_t bit = lsb;")
+        lines.append("        std::uint8_t out_shift = 0;")
+        lines.append("        while (remaining > 0) {")
+        lines.append("            const std::uint8_t word = bit / kAccessWidth;")
+        lines.append("            const std::uint8_t bit_in_word = bit % kAccessWidth;")
+        lines.append("            const std::uint8_t available = static_cast<std::uint8_t>(kAccessWidth - bit_in_word);")
+        lines.append("            const std::uint8_t chunk = remaining < available ? remaining : available;")
+        lines.append("            const data_t chunk_value = static_cast<data_t>((src[word] >> bit_in_word) & bitmask_for_width(chunk));")
+        lines.append("            out = static_cast<data_t>(out | static_cast<data_t>(chunk_value << out_shift));")
+        lines.append("            remaining = static_cast<std::uint8_t>(remaining - chunk);")
+        lines.append("            bit = static_cast<std::uint8_t>(bit + chunk);")
+        lines.append("            out_shift = static_cast<std::uint8_t>(out_shift + chunk);")
+        lines.append("        }")
+        lines.append("        return out;")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    static std::array<data_t, WordCount> extract_array(const reg_storage_t& src, std::uint8_t lsb, std::uint8_t width) {")
+        lines.append("        std::array<data_t, WordCount> out{};")
+        lines.append("        for (std::size_t idx = 0; idx < WordCount; ++idx) {")
+        lines.append("            const std::uint8_t chunk_width = word_width_for_field_word(width, idx);")
+        lines.append("            if (chunk_width != 0) {")
+        lines.append("                out[idx] = extract_scalar(src, static_cast<std::uint8_t>(lsb + idx * kAccessWidth), chunk_width);")
+        lines.append("            }")
+        lines.append("        }")
+        lines.append("        return out;")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    static void insert_scalar(reg_storage_t& dst, std::uint8_t lsb, std::uint8_t width, data_t value) {")
+        lines.append("        std::uint8_t remaining = width;")
+        lines.append("        std::uint8_t bit = lsb;")
+        lines.append("        std::uint8_t in_shift = 0;")
+        lines.append("        while (remaining > 0) {")
+        lines.append("            const std::uint8_t word = bit / kAccessWidth;")
+        lines.append("            const std::uint8_t bit_in_word = bit % kAccessWidth;")
+        lines.append("            const std::uint8_t available = static_cast<std::uint8_t>(kAccessWidth - bit_in_word);")
+        lines.append("            const std::uint8_t chunk = remaining < available ? remaining : available;")
+        lines.append("            const data_t chunk_mask = bitmask_for_width(chunk);")
+        lines.append("            const data_t word_mask_value = static_cast<data_t>(chunk_mask << bit_in_word);")
+        lines.append("            const data_t chunk_value = static_cast<data_t>(((value >> in_shift) & chunk_mask) << bit_in_word);")
+        lines.append("            dst[word] = static_cast<data_t>((dst[word] & static_cast<data_t>(~word_mask_value)) | chunk_value);")
+        lines.append("            remaining = static_cast<std::uint8_t>(remaining - chunk);")
+        lines.append("            bit = static_cast<std::uint8_t>(bit + chunk);")
+        lines.append("            in_shift = static_cast<std::uint8_t>(in_shift + chunk);")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    template <std::size_t WordCount>")
+        lines.append("    static void insert_array(reg_storage_t& dst, std::uint8_t lsb, std::uint8_t width, const std::array<data_t, WordCount>& value) {")
+        lines.append("        for (std::size_t idx = 0; idx < WordCount; ++idx) {")
+        lines.append("            const std::uint8_t chunk_width = word_width_for_field_word(width, idx);")
+        lines.append("            if (chunk_width != 0) {")
+        lines.append("                insert_scalar(dst, static_cast<std::uint8_t>(lsb + idx * kAccessWidth), chunk_width, value[idx]);")
+        lines.append("            }")
+        lines.append("        }")
+        lines.append("    }")
+        lines.append("")
+        lines.append("    static void clear_range(reg_storage_t& dst, std::uint8_t lsb, std::uint8_t width) {")
+        lines.append("        insert_scalar(dst, lsb, width, data_t{0});")
         lines.append("    }")
         lines.append("")
         lines.append("    void apply_singlepulse_clear() {")
-        lines.append("        if (singlepulse_mask_ == 0) {")
-        lines.append("            return;")
+        lines.append("        for (std::uint8_t idx = 0; idx < word_count_; ++idx) {")
+        lines.append("            write_shadow_[idx] = static_cast<data_t>(write_shadow_[idx] & static_cast<data_t>(~singlepulse_mask_[idx]));")
+        lines.append("            read_shadow_[idx] = static_cast<data_t>(read_shadow_[idx] & static_cast<data_t>(~singlepulse_mask_[idx]));")
         lines.append("        }")
-        lines.append("        write_shadow_ &= static_cast<data_t>(~singlepulse_mask_);")
-        lines.append("        read_shadow_ &= static_cast<data_t>(~singlepulse_mask_);")
         lines.append("    }")
         lines.append("")
         lines.append("    Context<BusT, ThrowOnError>& ctx_;")
         lines.append("    addr_t offset_;")
-        lines.append("    data_t read_shadow_;")
-        lines.append("    data_t write_shadow_;")
-        lines.append("    data_t read_mask_;")
-        lines.append("    data_t write_only_mask_;")
-        lines.append("    data_t rclr_mask_;")
-        lines.append("    data_t rset_mask_;")
-        lines.append("    data_t singlepulse_mask_;")
+        lines.append("    std::uint8_t reg_width_;")
+        lines.append("    std::uint8_t word_count_;")
+        lines.append("    reg_storage_t read_shadow_;")
+        lines.append("    reg_storage_t write_shadow_;")
+        lines.append("    reg_storage_t read_mask_;")
+        lines.append("    reg_storage_t write_only_mask_;")
+        lines.append("    reg_storage_t rclr_mask_;")
+        lines.append("    reg_storage_t rset_mask_;")
+        lines.append("    reg_storage_t singlepulse_mask_;")
         lines.append("    bool shadow_write_supported_;")
         lines.append("    bool dirty_;")
         lines.append("};")
@@ -1056,17 +1269,21 @@ class _Renderer:
 
         state_ctor = (
             "state_(ctx, reg_offset, "
-            + _data_lit(reg.reset)
+            + str(reg.width)
             + ", "
-            + _data_lit(reg.read_mask)
+            + str(reg.word_count)
             + ", "
-            + _data_lit(reg.write_only_mask)
+            + _word_array_lit(reg.reset, reg.word_count, self.design.access_width)
             + ", "
-            + _data_lit(reg.rclr_mask)
+            + _word_array_lit(reg.read_mask, reg.word_count, self.design.access_width)
             + ", "
-            + _data_lit(reg.rset_mask)
+            + _word_array_lit(reg.write_only_mask, reg.word_count, self.design.access_width)
             + ", "
-            + _data_lit(reg.singlepulse_mask)
+            + _word_array_lit(reg.rclr_mask, reg.word_count, self.design.access_width)
+            + ", "
+            + _word_array_lit(reg.rset_mask, reg.word_count, self.design.access_width)
+            + ", "
+            + _word_array_lit(reg.singlepulse_mask, reg.word_count, self.design.access_width)
             + ", kShadowWriteSupported"
             + ")"
         )
@@ -1079,7 +1296,10 @@ class _Renderer:
         lines.append("    {}")
         lines.append("")
 
-        lines.append("    data_t read() { return state_.read_hw(); }")
+        if reg.word_count == 1:
+            lines.append("    data_t read() { return state_.read_hw_scalar(); }")
+        else:
+            lines.append("    detail::reg_storage_t read() { return state_.read_hw(); }")
         lines.append("    bool supports_shadow_write() const { return kShadowWriteSupported; }")
         lines.append("    addr_t address() const { return state_.address(); }")
         lines.append("")
@@ -1124,12 +1344,15 @@ class _Renderer:
 
     def _emit_field_class(self, lines: List[str], reg: RegisterModel, field: FieldModel) -> None:
         cls = self._field_class_name(reg, field)
+        field_word_count = _ceil_div(field.width, self.design.access_width)
+        scalar_field = field.width <= self.design.access_width
         lines.append(f"    class {cls} {{")
         lines.append("    public:")
         lines.append(f"        static constexpr std::uint8_t LSB = {field.lsb};")
         lines.append(f"        static constexpr std::uint8_t MSB = {field.msb};")
         lines.append(f"        static constexpr std::uint8_t WIDTH = {field.width};")
-        lines.append(f"        static constexpr data_t MASK = {_data_lit(field.mask)};")
+        if not scalar_field:
+            lines.append(f"        static constexpr std::size_t WORD_COUNT = {field_word_count};")
         lines.append(
             f"        static constexpr detail::AccessMode SW = detail::AccessMode::{_sw_cpp(field.sw)};"
         )
@@ -1143,40 +1366,59 @@ class _Renderer:
         lines.append("")
 
         if field.readable:
-            lines.append("        data_t read() {")
-            lines.append("            return owner_->state_.read_field_hw(MASK, LSB);")
-            lines.append("        }")
+            if scalar_field:
+                lines.append("        data_t read() {")
+                lines.append("            return owner_->state_.read_field_hw_scalar(LSB, WIDTH);")
+                lines.append("        }")
+            else:
+                lines.append("        std::array<data_t, WORD_COUNT> read() {")
+                lines.append("            return owner_->state_.template read_field_hw_array<WORD_COUNT>(LSB, WIDTH);")
+                lines.append("        }")
             lines.append("")
 
         if field.writable:
-            lines.append("        template <typename IntT>")
-            lines.append("        void write(IntT value) {")
-            lines.append(
-                "            static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
-            )
-            lines.append('                "write() requires an integral type (excluding bool)");')
-            lines.append("            if constexpr (std::is_signed_v<IntT>) {")
-            lines.append(
-                "                owner_->state_.direct_write_signed(MASK, LSB, WIDTH, static_cast<detail::signed_input_t>(value), SW, SINGLEPULSE, "
-                + _c_string(field.path)
-                + ");"
-            )
-            lines.append("            } else {")
-            lines.append(
-                "                owner_->state_.direct_write_unsigned(MASK, LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), SW, SINGLEPULSE, "
-                + _c_string(field.path)
-                + ");"
-            )
-            lines.append("            }")
-            lines.append("        }")
+            if scalar_field:
+                lines.append("        template <typename IntT>")
+                lines.append("        void write(IntT value) {")
+                lines.append(
+                    "            static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
+                )
+                lines.append('                "write() requires an integral type (excluding bool)");')
+                lines.append("            if constexpr (std::is_signed_v<IntT>) {")
+                lines.append(
+                    "                owner_->state_.direct_write_signed(LSB, WIDTH, static_cast<detail::signed_input_t>(value), SW, SINGLEPULSE, "
+                    + _c_string(field.path)
+                    + ");"
+                )
+                lines.append("            } else {")
+                lines.append(
+                    "                owner_->state_.direct_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), SW, SINGLEPULSE, "
+                    + _c_string(field.path)
+                    + ");"
+                )
+                lines.append("            }")
+                lines.append("        }")
+            else:
+                lines.append("        void write(const std::array<data_t, WORD_COUNT>& value) {")
+                lines.append(
+                    "            owner_->state_.template direct_write_array<WORD_COUNT>(LSB, WIDTH, value, SW, SINGLEPULSE, "
+                    + _c_string(field.path)
+                    + ");"
+                )
+                lines.append("        }")
             lines.append("")
 
         lines.append("        class RdShadowOps {")
         lines.append("        public:")
         lines.append(f"            explicit RdShadowOps({cls}* owner) : owner_(owner) {{}}")
-        lines.append("            data_t read() const {")
-        lines.append("                return owner_->owner_->state_.read_field_shadow(MASK, LSB);")
-        lines.append("            }")
+        if scalar_field:
+            lines.append("            data_t read() const {")
+            lines.append("                return owner_->owner_->state_.read_field_shadow_scalar(LSB, WIDTH);")
+            lines.append("            }")
+        else:
+            lines.append("            std::array<data_t, WORD_COUNT> read() const {")
+            lines.append("                return owner_->owner_->state_.template read_field_shadow_array<WORD_COUNT>(LSB, WIDTH);")
+            lines.append("            }")
         lines.append("        private:")
         lines.append(f"            {cls}* owner_;")
         lines.append("        };")
@@ -1184,32 +1426,46 @@ class _Renderer:
         lines.append("        class WrShadowOps {")
         lines.append("        public:")
         lines.append(f"            explicit WrShadowOps({cls}* owner) : owner_(owner) {{}}")
-        lines.append("            data_t read() const {")
-        lines.append("                return owner_->owner_->state_.read_field_staged(MASK, LSB);")
-        lines.append("            }")
-        if field.writable:
-            lines.append("            template <typename IntT>")
-            lines.append("            void write(IntT value) {")
-            lines.append(
-                "                static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
-            )
-            lines.append(
-                '                    "wr_shadow.write() requires an integral type (excluding bool)");'
-            )
-            lines.append("                if constexpr (std::is_signed_v<IntT>) {")
-            lines.append(
-                "                    owner_->owner_->state_.shadow_write_signed(MASK, LSB, WIDTH, static_cast<detail::signed_input_t>(value), "
-                + _c_string(field.path)
-                + ");"
-            )
-            lines.append("                } else {")
-            lines.append(
-                "                    owner_->owner_->state_.shadow_write_unsigned(MASK, LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), "
-                + _c_string(field.path)
-                + ");"
-            )
-            lines.append("                }")
+        if scalar_field:
+            lines.append("            data_t read() const {")
+            lines.append("                return owner_->owner_->state_.read_field_staged_scalar(LSB, WIDTH);")
             lines.append("            }")
+        else:
+            lines.append("            std::array<data_t, WORD_COUNT> read() const {")
+            lines.append("                return owner_->owner_->state_.template read_field_staged_array<WORD_COUNT>(LSB, WIDTH);")
+            lines.append("            }")
+        if field.writable:
+            if scalar_field:
+                lines.append("            template <typename IntT>")
+                lines.append("            void write(IntT value) {")
+                lines.append(
+                    "                static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
+                )
+                lines.append(
+                    '                    "wr_shadow.write() requires an integral type (excluding bool)");'
+                )
+                lines.append("                if constexpr (std::is_signed_v<IntT>) {")
+                lines.append(
+                    "                    owner_->owner_->state_.shadow_write_signed(LSB, WIDTH, static_cast<detail::signed_input_t>(value), "
+                    + _c_string(field.path)
+                    + ");"
+                )
+                lines.append("                } else {")
+                lines.append(
+                    "                    owner_->owner_->state_.shadow_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), "
+                    + _c_string(field.path)
+                    + ");"
+                )
+                lines.append("                }")
+                lines.append("            }")
+            else:
+                lines.append("            void write(const std::array<data_t, WORD_COUNT>& value) {")
+                lines.append(
+                    "                owner_->owner_->state_.template shadow_write_array<WORD_COUNT>(LSB, WIDTH, value, "
+                    + _c_string(field.path)
+                    + ");"
+                )
+                lines.append("            }")
         lines.append("        private:")
         lines.append(f"            {cls}* owner_;")
         lines.append("        };")
@@ -1495,6 +1751,15 @@ def _data_lit(value: int) -> str:
     return f"static_cast<data_t>(0x{value:X}ull)"
 
 
+def _word_array_lit(value: int, word_count: int, access_width: int) -> str:
+    word_mask = (1 << access_width) - 1
+    words = [
+        _data_lit((value >> (idx * access_width)) & word_mask)
+        for idx in range(word_count)
+    ]
+    return "detail::reg_storage_t{" + ", ".join(words) + "}"
+
+
 def _addr_lit(value: int) -> str:
     return f"0x{value:X}u"
 
@@ -1515,6 +1780,21 @@ def _field_mask(field: FieldNode) -> int:
     else:
         raw = (1 << field.width) - 1
     return raw << field.lsb
+
+
+def _ceil_div(value: int, divisor: int) -> int:
+    return (value + divisor - 1) // divisor
+
+
+def _field_crosses_access_word(field: FieldNode, access_width: int) -> bool:
+    return (int(field.lsb) // access_width) != (int(field.msb) // access_width)
+
+
+def _optional_bool_property(node: Node, name: str) -> bool:
+    try:
+        return bool(node.get_property(name))
+    except LookupError:
+        return False
 
 
 def _is_sw_readable(sw: AccessType) -> bool:
