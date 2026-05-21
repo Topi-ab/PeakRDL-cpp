@@ -1,0 +1,3 @@
+recursive-include examples *.cpp *.md *.rdl
+recursive-include tests/fixtures *.rdl
+recursive-include doc *.md

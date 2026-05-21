@@ -1,0 +1,24 @@
+property buffer_reads {
+  component = reg;
+  type = boolean;
+};
+
+property buffer_writes {
+  component = reg;
+  type = boolean;
+};
+
+addrmap wide64_32 {
+  reg {
+    regwidth = 64;
+    accesswidth = 32;
+    buffer_reads = true;
+    buffer_writes = true;
+
+    field {
+      sw=wr;
+      hw=r;
+    } data[64];
+
+  } wide_reg;
+};

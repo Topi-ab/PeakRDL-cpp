@@ -70,7 +70,11 @@ Generated API shape:
 - Write range validation:
   - enabled by default
   - disable with `--no-write-range-check` to skip generated runtime range checks on `write()` and `wr_shadow.write()`
-  - `write()`/`wr_shadow.write()` accept both signed and unsigned integral input types regardless of field signedness.
+  - non-enum scalar fields accept both signed and unsigned integral input types for `write()` and `wr_shadow.write()`.
+- Enum fields:
+  - SystemRDL fields with `encode = some_enum;` emit a public C++ `enum class`.
+  - Encoded scalar field APIs use that enum type for `read()`, `write(...)`, `rd_shadow.read()`, `wr_shadow.read()`, and `wr_shadow.write(...)`.
+  - Raw integral writes are intentionally not part of the encoded field API.
 - Access width:
   - `data_t` is deduced from SystemRDL `accesswidth`.
   - If more than one numeric `accesswidth` is present in the design, generation fails.
@@ -123,6 +127,9 @@ The test suite includes end-to-end validation:
 - execute runtime behavior checks
 
 ## Maintainer Notes
+
+Version history is documented in
+[doc/VERSION_HISTORY.md](https://github.com/Topi-ab/PeakRDL-cpp/blob/main/doc/VERSION_HISTORY.md).
 
 Release instructions are documented in
 [RELEASE.md](https://github.com/Topi-ab/PeakRDL-cpp/blob/main/RELEASE.md).

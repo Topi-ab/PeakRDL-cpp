@@ -1,0 +1,33 @@
+enum mode_e {
+    idle = 0;
+    run = 1;
+    sleep = 2;
+    fault = 3;
+};
+
+enum state_e {
+    boot = 0;
+    ready = 1;
+    error = 2;
+};
+
+addrmap enum_root {
+    reg {
+        field {
+            sw = rw;
+            hw = r;
+            encode = mode_e;
+        } mode[1:0] = 0;
+
+        field {
+            sw = r;
+            hw = w;
+            encode = state_e;
+        } state[5:4] = 1;
+
+        field {
+            sw = rw;
+            hw = r;
+        } enable[8:8] = 0;
+    } status @0x0;
+};

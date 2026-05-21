@@ -117,6 +117,8 @@ def _pick_simple_rw_field(top) -> FieldTarget:
                 continue
             if field.get_property("onwrite") is not None:
                 continue
+            if field.get_property("encode") is not None:
+                continue
             if bool(field.get_property("singlepulse")):
                 continue
             if bool(field.get_property("swwe")) or bool(field.get_property("swwel")):

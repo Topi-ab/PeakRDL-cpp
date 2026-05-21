@@ -889,6 +889,165 @@ def test_wide_field_array_api_generate_compile_and_run() -> None:
     _build_and_run_cpp(cpp_file, exe_file)
 
 
+def test_wide_64bit_field_on_32bit_access_covers_all_bits() -> None:
+    case_dir = _reset_case_dir("wide_64bit_field_on_32bit_access")
+
+    rdl_text = """
+    property buffer_reads { component = reg; type = boolean; };
+    property buffer_writes { component = reg; type = boolean; };
+
+    addrmap top {
+      reg {
+        regwidth = 64;
+        accesswidth = 32;
+        buffer_reads = true;
+        buffer_writes = true;
+        field { sw=rw; } data[64] = 64'h0;
+      } r0 @0x0;
+
+      reg {
+        regwidth = 64;
+        accesswidth = 32;
+        buffer_reads = true;
+        buffer_writes = true;
+        field { sw=rw; } signed_byte[7:0] = 8'h0;
+        field { sw=rw; } unsigned_byte[15:8] = 8'h0;
+      } r1 @0x8;
+    };
+    """
+
+    rdl_file = case_dir / "design.rdl"
+    hpp_file = case_dir / "regs.hpp"
+    cpp_file = case_dir / "test.cpp"
+    exe_file = case_dir / "test_bin"
+    rdl_file.write_text(rdl_text, encoding="utf-8")
+
+    top = _compile_top(rdl_file)
+    CppExporter().export(top, hpp_file, namespace="demo", class_name="TopRoot", error_style="exceptions")
+
+    cpp_test = f"""
+    #include <array>
+    #include <cassert>
+    #include <concepts>
+    #include <cstdint>
+    #include <unordered_map>
+
+    #include \"{hpp_file}\"
+
+    struct MockBus {{
+        std::unordered_map<demo::addr_t, demo::data_t> mem;
+        std::unordered_map<demo::addr_t, std::uint64_t> read_count;
+        std::unordered_map<demo::addr_t, std::uint64_t> write_count;
+
+        demo::data_t read(demo::addr_t addr) {{
+            read_count[addr]++;
+            return mem[addr];
+        }}
+
+        void write(demo::addr_t addr, demo::data_t value) {{
+            write_count[addr]++;
+            mem[addr] = value;
+        }}
+    }};
+
+    template <typename T>
+    concept HasSignedScalarWrite = requires(T f) {{ f.write(std::int64_t{{-1}}); }};
+
+    template <typename T>
+    concept HasUnsignedScalarWrite = requires(T f) {{ f.write(std::uint64_t{{1}}); }};
+
+    template <typename T>
+    concept HasArrayWrite = requires(T f, std::array<demo::data_t, 2> value) {{ f.write(value); }};
+
+    int main() {{
+        using Root = demo::TopRoot<MockBus>;
+        using DataField = decltype(std::declval<Root&>().r0.data);
+        using SignedByteField = decltype(std::declval<Root&>().r1.signed_byte);
+        static_assert(!HasSignedScalarWrite<DataField>);
+        static_assert(!HasUnsignedScalarWrite<DataField>);
+        static_assert(HasArrayWrite<DataField>);
+        static_assert(HasSignedScalarWrite<SignedByteField>);
+        static_assert(HasUnsignedScalarWrite<SignedByteField>);
+
+        MockBus bus;
+        Root root(bus, 0);
+
+        constexpr demo::addr_t kLo = 0x0u;
+        constexpr demo::addr_t kHi = 0x4u;
+
+        bus.mem[kLo] = 0x80000001u;
+        bus.mem[kHi] = 0x80000001u;
+
+        std::array<demo::data_t, 2> read_value = root.r0.data.read();
+        assert(read_value[0] == 0x80000001u);
+        assert(read_value[1] == 0x80000001u);
+        assert(bus.read_count[kLo] == 1u);
+        assert(bus.read_count[kHi] == 1u);
+        assert(root.r0.data.rd_shadow.read() == read_value);
+        assert(root.r0.data.wr_shadow.read() == read_value);
+
+        std::array<demo::data_t, 2> direct_value{{0x00000001u, 0x80000000u}};
+        root.r0.data.write(direct_value);
+        assert(bus.mem[kLo] == 0x00000001u);
+        assert(bus.mem[kHi] == 0x80000000u);
+        assert(bus.write_count[kLo] == 1u);
+        assert(bus.write_count[kHi] == 1u);
+        assert(root.r0.data.rd_shadow.read() == direct_value);
+        assert(root.r0.data.wr_shadow.read() == direct_value);
+
+        std::array<demo::data_t, 2> staged_value{{0x80000000u, 0x00000001u}};
+        root.r0.data.wr_shadow.write(staged_value);
+        assert(root.r0.wr_shadow.dirty());
+        assert(root.r0.data.rd_shadow.read() == direct_value);
+        assert(root.r0.data.wr_shadow.read() == staged_value);
+
+        root.r0.wr_shadow.flush();
+        assert(bus.mem[kLo] == 0x80000000u);
+        assert(bus.mem[kHi] == 0x00000001u);
+        assert(bus.write_count[kLo] == 2u);
+        assert(bus.write_count[kHi] == 2u);
+        assert(!root.r0.wr_shadow.dirty());
+        assert(root.r0.data.wr_shadow.read() == staged_value);
+
+        constexpr demo::addr_t kR1Lo = 0x8u;
+        constexpr demo::addr_t kR1Hi = 0xCu;
+        bus.mem[kR1Lo] = 0x00000000u;
+        bus.mem[kR1Hi] = 0x00000000u;
+
+        std::uint64_t signed_direct_read = 0;
+        root.r1.signed_byte.write(std::int64_t{{-1}});
+        signed_direct_read = root.r1.signed_byte.read();
+        assert(signed_direct_read == 0xFFull);
+        assert((bus.mem[kR1Lo] & 0x000000FFu) == 0x000000FFu);
+
+        std::uint64_t unsigned_direct_read = 0;
+        root.r1.unsigned_byte.write(std::uint64_t{{0xA5u}});
+        unsigned_direct_read = root.r1.unsigned_byte.read();
+        assert(unsigned_direct_read == 0xA5ull);
+        assert((bus.mem[kR1Lo] & 0x0000FF00u) == 0x0000A500u);
+
+        root.r1.signed_byte.wr_shadow.write(std::int64_t{{-2}});
+        root.r1.unsigned_byte.wr_shadow.write(std::uint64_t{{0x5Au}});
+        std::uint64_t signed_shadow_read = root.r1.signed_byte.wr_shadow.read();
+        std::uint64_t unsigned_shadow_read = root.r1.unsigned_byte.wr_shadow.read();
+        assert(signed_shadow_read == 0xFEull);
+        assert(unsigned_shadow_read == 0x5Aull);
+        assert(root.r1.wr_shadow.dirty());
+
+        root.r1.wr_shadow.flush();
+        assert((bus.mem[kR1Lo] & 0x0000FFFFu) == 0x00005AFEu);
+        assert(bus.mem[kR1Hi] == 0x00000000u);
+        assert(!root.r1.wr_shadow.dirty());
+
+        assert(root.ok());
+        return 0;
+    }}
+    """
+
+    cpp_file.write_text(cpp_test, encoding="utf-8")
+    _build_and_run_cpp(cpp_file, exe_file)
+
+
 def test_generation_fails_on_wr_shadow_impl_name_conflict() -> None:
     case_dir = _reset_case_dir("wr_shadow_impl_name_conflict")
 

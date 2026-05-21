@@ -145,6 +145,18 @@ _REG_RESERVED = {
 
 
 @dataclass(frozen=True)
+class EnumMemberModel:
+    cpp_name: str
+    value: int
+
+
+@dataclass(frozen=True)
+class EnumModel:
+    cpp_name: str
+    members: Tuple[EnumMemberModel, ...]
+
+
+@dataclass(frozen=True)
 class FieldModel:
     cpp_name: str
     path: str
@@ -159,6 +171,7 @@ class FieldModel:
     reset: int
     readable: bool
     writable: bool
+    enum_cpp_type: Optional[str]
 
 
 @dataclass
@@ -215,6 +228,7 @@ class DesignModel:
     check_write_range: bool
     access_width: int
     data_type: str
+    enums: List[EnumModel]
     top: ContainerModel
 
 
@@ -270,6 +284,7 @@ class CppExporter:
             check_write_range=check_write_range,
             access_width=access_width,
             data_type=_cpp_uint_type(access_width),
+            enums=builder.enums,
             top=top_model,
         )
 
@@ -316,6 +331,8 @@ class _ModelBuilder:
         self.access_width = access_width
         self.class_name_map: Dict[str, str] = {}
         self.used_class_names: Dict[str, int] = {}
+        self.enum_models: Dict[Any, EnumModel] = {}
+        self.used_enum_names: Dict[str, int] = {}
 
     def build_top(self) -> ContainerModel:
         top_class = self._class_name((self.top_node.inst_name,), "top")
@@ -326,6 +343,10 @@ class _ModelBuilder:
             class_name=top_class,
             is_top=True,
         )
+
+    @property
+    def enums(self) -> List[EnumModel]:
+        return list(self.enum_models.values())
 
     def _build_container(
         self,
@@ -536,6 +557,13 @@ class _ModelBuilder:
             has_readable_field = has_readable_field or readable
             has_writable_field = has_writable_field or writable
 
+            enum_cpp_type = self._enum_cpp_type(field)
+            if enum_cpp_type is not None and field.width > self.access_width:
+                raise ValueError(
+                    f"Field '{field.get_path()}' uses encode enum on width {field.width}. "
+                    "Enum field APIs are currently supported only for scalar fields."
+                )
+
             if reg_width > self.access_width and _field_crosses_access_word(field, self.access_width):
                 if readable and not buffer_reads:
                     raise ValueError(
@@ -574,6 +602,7 @@ class _ModelBuilder:
                     reset=reset_value,
                     readable=readable,
                     writable=writable,
+                    enum_cpp_type=enum_cpp_type,
                 )
             )
 
@@ -653,6 +682,48 @@ class _ModelBuilder:
         self.class_name_map[key] = candidate
         return candidate
 
+    def _enum_cpp_type(self, field: FieldNode) -> Optional[str]:
+        encoded_enum = field.get_property("encode")
+        if encoded_enum is None:
+            return None
+
+        if encoded_enum in self.enum_models:
+            return self.enum_models[encoded_enum].cpp_name
+
+        raw_name = getattr(encoded_enum, "type_name", None)
+        if not raw_name:
+            raise ValueError(f"Unable to determine enum type name for '{field.get_path()}'")
+
+        cpp_name = _sanitize_identifier(str(raw_name))
+        if cpp_name in {"addr_t", "data_t", "kAccessWidth", "kCheckWriteRange", "detail"}:
+            cpp_name = f"{cpp_name}_"
+        if cpp_name in self.used_enum_names:
+            self.used_enum_names[cpp_name] += 1
+            cpp_name = f"{cpp_name}{self.used_enum_names[cpp_name]}"
+        else:
+            self.used_enum_names[cpp_name] = 0
+
+        member_names: set[str] = set()
+        members: List[EnumMemberModel] = []
+        limit = (1 << field.width) - 1
+        for member in encoded_enum:
+            member_name = _sanitize_identifier(str(member.name))
+            if member_name in member_names:
+                raise ValueError(
+                    f"Enum '{raw_name}' has duplicate generated C++ member '{member_name}'"
+                )
+            member_names.add(member_name)
+            value = int(member.value)
+            if value < 0 or value > limit:
+                raise ValueError(
+                    f"Enum member '{raw_name}.{member.name}' value {value} does not fit field "
+                    f"'{field.get_path()}' width {field.width}"
+                )
+            members.append(EnumMemberModel(cpp_name=member_name, value=value))
+
+        self.enum_models[encoded_enum] = EnumModel(cpp_name=cpp_name, members=tuple(members))
+        return cpp_name
+
 
 class _Renderer:
     def __init__(self, design: DesignModel):
@@ -695,6 +766,7 @@ class _Renderer:
         lines.append("//   void write(addr_t addr, data_t value);")
         lines.append("")
 
+        self._emit_enums(lines)
         self._emit_detail_runtime(lines)
 
         reg_models = self._collect_register_models(self.design.top)
@@ -710,6 +782,15 @@ class _Renderer:
         lines.append(f"}} // namespace {self.design.namespace}")
         lines.append("")
         return "\n".join(lines)
+
+    def _emit_enums(self, lines: List[str]) -> None:
+        for enum in self.design.enums:
+            lines.append(f"enum class {enum.cpp_name} : data_t {{")
+            for idx, member in enumerate(enum.members):
+                suffix = "," if idx + 1 < len(enum.members) else ""
+                lines.append(f"    {member.cpp_name} = static_cast<data_t>({member.value}ull){suffix}")
+            lines.append("};")
+            lines.append("")
 
     def _emit_detail_runtime(self, lines: List[str]) -> None:
         lines.append("namespace detail {")
@@ -1346,6 +1427,7 @@ class _Renderer:
         cls = self._field_class_name(reg, field)
         field_word_count = _ceil_div(field.width, self.design.access_width)
         scalar_field = field.width <= self.design.access_width
+        scalar_api_type = field.enum_cpp_type or "data_t"
         lines.append(f"    class {cls} {{")
         lines.append("    public:")
         lines.append(f"        static constexpr std::uint8_t LSB = {field.lsb};")
@@ -1367,8 +1449,10 @@ class _Renderer:
 
         if field.readable:
             if scalar_field:
-                lines.append("        data_t read() {")
-                lines.append("            return owner_->state_.read_field_hw_scalar(LSB, WIDTH);")
+                lines.append(f"        {scalar_api_type} read() {{")
+                lines.append(
+                    f"            return static_cast<{scalar_api_type}>(owner_->state_.read_field_hw_scalar(LSB, WIDTH));"
+                )
                 lines.append("        }")
             else:
                 lines.append("        std::array<data_t, WORD_COUNT> read() {")
@@ -1378,26 +1462,35 @@ class _Renderer:
 
         if field.writable:
             if scalar_field:
-                lines.append("        template <typename IntT>")
-                lines.append("        void write(IntT value) {")
-                lines.append(
-                    "            static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
-                )
-                lines.append('                "write() requires an integral type (excluding bool)");')
-                lines.append("            if constexpr (std::is_signed_v<IntT>) {")
-                lines.append(
-                    "                owner_->state_.direct_write_signed(LSB, WIDTH, static_cast<detail::signed_input_t>(value), SW, SINGLEPULSE, "
-                    + _c_string(field.path)
-                    + ");"
-                )
-                lines.append("            } else {")
-                lines.append(
-                    "                owner_->state_.direct_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), SW, SINGLEPULSE, "
-                    + _c_string(field.path)
-                    + ");"
-                )
-                lines.append("            }")
-                lines.append("        }")
+                if field.enum_cpp_type:
+                    lines.append(f"        void write({field.enum_cpp_type} value) {{")
+                    lines.append(
+                        "            owner_->state_.direct_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), SW, SINGLEPULSE, "
+                        + _c_string(field.path)
+                        + ");"
+                    )
+                    lines.append("        }")
+                else:
+                    lines.append("        template <typename IntT>")
+                    lines.append("        void write(IntT value) {")
+                    lines.append(
+                        "            static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
+                    )
+                    lines.append('                "write() requires an integral type (excluding bool)");')
+                    lines.append("            if constexpr (std::is_signed_v<IntT>) {")
+                    lines.append(
+                        "                owner_->state_.direct_write_signed(LSB, WIDTH, static_cast<detail::signed_input_t>(value), SW, SINGLEPULSE, "
+                        + _c_string(field.path)
+                        + ");"
+                    )
+                    lines.append("            } else {")
+                    lines.append(
+                        "                owner_->state_.direct_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), SW, SINGLEPULSE, "
+                        + _c_string(field.path)
+                        + ");"
+                    )
+                    lines.append("            }")
+                    lines.append("        }")
             else:
                 lines.append("        void write(const std::array<data_t, WORD_COUNT>& value) {")
                 lines.append(
@@ -1412,8 +1505,10 @@ class _Renderer:
         lines.append("        public:")
         lines.append(f"            explicit RdShadowOps({cls}* owner) : owner_(owner) {{}}")
         if scalar_field:
-            lines.append("            data_t read() const {")
-            lines.append("                return owner_->owner_->state_.read_field_shadow_scalar(LSB, WIDTH);")
+            lines.append(f"            {scalar_api_type} read() const {{")
+            lines.append(
+                f"                return static_cast<{scalar_api_type}>(owner_->owner_->state_.read_field_shadow_scalar(LSB, WIDTH));"
+            )
             lines.append("            }")
         else:
             lines.append("            std::array<data_t, WORD_COUNT> read() const {")
@@ -1427,8 +1522,10 @@ class _Renderer:
         lines.append("        public:")
         lines.append(f"            explicit WrShadowOps({cls}* owner) : owner_(owner) {{}}")
         if scalar_field:
-            lines.append("            data_t read() const {")
-            lines.append("                return owner_->owner_->state_.read_field_staged_scalar(LSB, WIDTH);")
+            lines.append(f"            {scalar_api_type} read() const {{")
+            lines.append(
+                f"                return static_cast<{scalar_api_type}>(owner_->owner_->state_.read_field_staged_scalar(LSB, WIDTH));"
+            )
             lines.append("            }")
         else:
             lines.append("            std::array<data_t, WORD_COUNT> read() const {")
@@ -1436,28 +1533,37 @@ class _Renderer:
             lines.append("            }")
         if field.writable:
             if scalar_field:
-                lines.append("            template <typename IntT>")
-                lines.append("            void write(IntT value) {")
-                lines.append(
-                    "                static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
-                )
-                lines.append(
-                    '                    "wr_shadow.write() requires an integral type (excluding bool)");'
-                )
-                lines.append("                if constexpr (std::is_signed_v<IntT>) {")
-                lines.append(
-                    "                    owner_->owner_->state_.shadow_write_signed(LSB, WIDTH, static_cast<detail::signed_input_t>(value), "
-                    + _c_string(field.path)
-                    + ");"
-                )
-                lines.append("                } else {")
-                lines.append(
-                    "                    owner_->owner_->state_.shadow_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), "
-                    + _c_string(field.path)
-                    + ");"
-                )
-                lines.append("                }")
-                lines.append("            }")
+                if field.enum_cpp_type:
+                    lines.append(f"            void write({field.enum_cpp_type} value) {{")
+                    lines.append(
+                        "                owner_->owner_->state_.shadow_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), "
+                        + _c_string(field.path)
+                        + ");"
+                    )
+                    lines.append("            }")
+                else:
+                    lines.append("            template <typename IntT>")
+                    lines.append("            void write(IntT value) {")
+                    lines.append(
+                        "                static_assert(std::is_integral_v<IntT> && !std::is_same_v<std::remove_cv_t<IntT>, bool>,"
+                    )
+                    lines.append(
+                        '                    "wr_shadow.write() requires an integral type (excluding bool)");'
+                    )
+                    lines.append("                if constexpr (std::is_signed_v<IntT>) {")
+                    lines.append(
+                        "                    owner_->owner_->state_.shadow_write_signed(LSB, WIDTH, static_cast<detail::signed_input_t>(value), "
+                        + _c_string(field.path)
+                        + ");"
+                    )
+                    lines.append("                } else {")
+                    lines.append(
+                        "                    owner_->owner_->state_.shadow_write_unsigned(LSB, WIDTH, static_cast<detail::unsigned_input_t>(value), "
+                        + _c_string(field.path)
+                        + ");"
+                    )
+                    lines.append("                }")
+                    lines.append("            }")
             else:
                 lines.append("            void write(const std::array<data_t, WORD_COUNT>& value) {")
                 lines.append(
